@@ -80,7 +80,16 @@ def _load_ratings(cache_dir: Path) -> tuple[pd.DataFrame, RatingState]:
     hist, state = cache_dir / HISTORY_FILE, cache_dir / STATE_FILE
     if not hist.exists() or not state.exists():
         _fail("Ratings not built yet. Run `f1pred ratings build` first.", 1)
-    return pd.read_parquet(hist), RatingState.from_json(state)
+    history = pd.read_parquet(hist)
+    table_through = pd.read_parquet(cache_dir / DRIVER_RACE_FILE, columns=["date"])["date"].max()
+    ratings_through = history["date"].max()
+    if table_through > ratings_through:
+        _fail(
+            f"Ratings are older than the data (table through {table_through.date()}, "
+            f"ratings through {ratings_through.date()}). Run `f1pred ratings build`.",
+            1,
+        )
+    return history, RatingState.from_json(state)
 
 
 def _parse_seasons(text: str) -> list[int]:

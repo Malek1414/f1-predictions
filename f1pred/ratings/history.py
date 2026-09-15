@@ -10,9 +10,11 @@ from pathlib import Path
 import pandas as pd
 
 from f1pred.config import ModelParams
-from f1pred.data.track_types import DEFAULT_TRACK_TYPE
 from f1pred.ratings.conditional import strengths
 from f1pred.ratings.elo import apply_update, race_update, regress
+
+# Phase 4 and 5 feature columns; a table without them is stale and must be rebuilt.
+REQUIRED_FEATURE_COLUMNS = ("is_wet", "track_type", "lap1_position")
 
 HISTORY_COLUMNS = [
     "race_id",
@@ -150,17 +152,20 @@ def replay(table: pd.DataFrame, params: ModelParams) -> tuple[pd.DataFrame, Rati
 
     history has one row per table row with the ratings *before* that session.
     """
+    missing = [c for c in REQUIRED_FEATURE_COLUMNS if c not in table.columns]
+    if missing:
+        raise ValueError(
+            f"table is missing columns: {', '.join(missing)}. Rebuild it with `f1pred data update`."
+        )
     state = RatingState()
     rows: list[dict] = []
     ordered = table.sort_values(["date", "race_id", "is_sprint"], kind="stable")
-    has_wet = "is_wet" in ordered.columns
-    has_track = "track_type" in ordered.columns
     for (date, race_id, is_sprint), grp in ordered.groupby(
         ["date", "race_id", "is_sprint"], sort=True
     ):
         season = int(grp["season"].iloc[0])
-        is_wet = bool(grp["is_wet"].iloc[0]) if has_wet else False
-        track_type = str(grp["track_type"].iloc[0]) if has_track else DEFAULT_TRACK_TYPE
+        is_wet = bool(grp["is_wet"].iloc[0])
+        track_type = str(grp["track_type"].iloc[0])
         start_season(state, season, params)
         d_track = state.driver_track.setdefault(track_type, {})
         c_track = state.constructor_track.setdefault(track_type, {})

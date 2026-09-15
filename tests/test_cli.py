@@ -73,6 +73,24 @@ def test_predict_without_ratings_exits_1(tmp_path, raw_sample, driver_race):
     assert "f1pred ratings build" in r.output
 
 
+def test_cli_predict_with_stale_ratings_exits_1(cache_dir, tmp_path, driver_race):
+    # Ratings built on a table missing the last race, then the full table restored: the data is
+    # newer than the ratings, so predict must stop and say to rebuild them.
+    stale = tmp_path / "cache"
+    stale.mkdir()
+    for p in cache_dir.glob("*.parquet"):
+        (stale / p.name).write_bytes(p.read_bytes())
+    last = int(driver_race[driver_race.season == 2024].race_id.max())
+    driver_race[driver_race.race_id != last].to_parquet(stale / "driver_race.parquet", index=False)
+    r = runner.invoke(app, ["ratings", "build", "--cache-dir", str(stale)])
+    assert r.exit_code == 0, r.output
+    driver_race.to_parquet(stale / "driver_race.parquet", index=False)
+    r = runner.invoke(
+        app, ["predict", "--season", "2024", "--round", "1", "--cache-dir", str(stale)]
+    )
+    assert r.exit_code == 1 and "ratings build" in r.output
+
+
 def test_backtest_writes_outputs(cache_dir, tmp_path):
     runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
     r = runner.invoke(

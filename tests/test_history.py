@@ -27,6 +27,9 @@ def _row(season, rnd, race_id, date, driver, team, grid, pos, is_sprint=False):
         "dnf_kind": None if pos is not None else "mechanical",
         "points": 0.0,
         "is_sprint": is_sprint,
+        "is_wet": False,
+        "track_type": "mixed",
+        "lap1_position": grid,
     }
 
 
@@ -173,11 +176,12 @@ def test_conditional_ratings_update_only_on_matching_condition(tiny_table):
     assert not r3.loc["a", "is_wet"]
 
 
-def test_replay_without_condition_columns_is_all_dry_mixed(tiny_table):
-    history, state = replay(tiny_table, P)
-    assert not history.is_wet.any() and history.track_type.eq("mixed").all()
-    assert state.driver_wet == {} and state.driver_wet_n == {}
-    assert state.driver_track_n["mixed"]["a"] == 2
+@pytest.mark.parametrize("missing", ["is_wet", "track_type", "lap1_position"])
+def test_replay_requires_condition_columns(tiny_table, missing):
+    # Phase 6: a table without the Phase 4/5 columns fails loudly instead of silently
+    # replaying as all-dry, all-mixed.
+    with pytest.raises(ValueError, match=f"missing columns: .*{missing}"):
+        replay(tiny_table.drop(columns=[missing]), P)
 
 
 def test_state_json_roundtrip_with_conditionals(tiny_table, tmp_path):

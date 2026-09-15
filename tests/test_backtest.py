@@ -6,6 +6,7 @@ import pytest
 from f1pred.backtest.run import (
     RACE_SCORE_COLUMNS,
     SEASON_SCORE_COLUMNS,
+    StaleRatingsError,
     calibration_table,
     entrants_for_past_race,
     run_backtest,
@@ -147,6 +148,25 @@ def test_entrants_carry_profiles(driver_race, sample_history):
     assert (e.aggression, e.risk, e.form) == (p.aggression, p.risk, p.form)
     plain = entrants_for_past_race(rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, P)
     assert all(x.aggression == 0 and x.risk == 0 and x.form == 0 for x in plain)
+
+
+def test_stale_history_raises_clear_error(driver_race, sample_history):
+    # Ratings built before the last race: the backtest must say so, not KeyError.
+    last = int(driver_race[driver_race.season == 2024].race_id.max())
+    hist = sample_history[sample_history.race_id != last]
+    with pytest.raises(StaleRatingsError, match="ratings build"):
+        run_backtest(driver_race, hist, [2024], P, n_runs=10)
+
+
+def test_entrants_missing_driver_raises_clear_error(driver_race, sample_history):
+    race_id = int(
+        driver_race[(driver_race.season == 2024) & (~driver_race.is_sprint)].race_id.iloc[-1]
+    )
+    rows = driver_race[(driver_race.race_id == race_id) & (~driver_race.is_sprint)]
+    hist = sample_history[(sample_history.race_id == race_id) & (~sample_history.is_sprint)]
+    hist = hist[hist.driver_id != "max_verstappen"]
+    with pytest.raises(StaleRatingsError, match="max_verstappen.*ratings build"):
+        entrants_for_past_race(rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, P)
 
 
 def test_ablation_has_profile_variant(driver_race, sample_history):

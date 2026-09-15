@@ -173,8 +173,7 @@ def _rain_for_race(
         return 0.0, "disabled"
     if race.has_results:
         rows = table[(table["race_id"] == race.race_id) & (~table["is_sprint"])]
-        wet = bool(rows["is_wet"].iloc[0]) if "is_wet" in rows.columns else False
-        return (1.0 if wet else 0.0), "observed"
+        return (1.0 if bool(rows["is_wet"].iloc[0]) else 0.0), "observed"
     prob = fetch_rain_probability(
         race.lat, race.lng, race.date, race.time, params.race_window_hours
     )

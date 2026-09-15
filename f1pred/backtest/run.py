@@ -47,6 +47,13 @@ class BacktestResult:
     calibration: pd.DataFrame
 
 
+class StaleRatingsError(Exception):
+    """The ratings history does not cover a race in the driver-race table."""
+
+
+REBUILD_HINT = "Run `f1pred ratings build` to bring the ratings up to date with the data."
+
+
 def entrants_for_past_race(
     race_rows: pd.DataFrame,
     history_rows: pd.DataFrame,
@@ -56,28 +63,29 @@ def entrants_for_past_race(
 ) -> list[Entrant]:
     """Entrants from pre-race rows; a missing profile (spec 6.6) is zero."""
     hist = history_rows.set_index("driver_id")
-    conditional = "driver_wet_pre" in hist.columns
     profiles = {} if profiles is None else profiles
     out = []
     for r in race_rows.itertuples(index=False):
+        if r.driver_id not in hist.index:
+            raise StaleRatingsError(
+                f"No pre-race rating for {r.driver_id} in {r.race_name} {int(r.season)} "
+                f"(race_id {int(r.race_id)}). {REBUILD_HINT}"
+            )
         h = hist.loc[r.driver_id]
         profile = profiles.get((int(r.race_id), r.driver_id), Profile.zero())
-        if conditional:
-            dry, wet = strengths(
-                float(h.driver_rating_pre),
-                float(h.constructor_rating_pre),
-                float(h.driver_track_pre),
-                float(h.constructor_track_pre),
-                int(h.driver_track_n_pre),
-                int(h.constructor_track_n_pre),
-                float(h.driver_wet_pre),
-                float(h.constructor_wet_pre),
-                int(h.driver_wet_n_pre),
-                int(h.constructor_wet_n_pre),
-                params,
-            )
-        else:  # Phase 1 history without conditional columns
-            dry = wet = float(h.driver_rating_pre + h.constructor_rating_pre)
+        dry, wet = strengths(
+            float(h.driver_rating_pre),
+            float(h.constructor_rating_pre),
+            float(h.driver_track_pre),
+            float(h.constructor_track_pre),
+            int(h.driver_track_n_pre),
+            int(h.constructor_track_n_pre),
+            float(h.driver_wet_pre),
+            float(h.constructor_wet_pre),
+            int(h.driver_wet_n_pre),
+            int(h.constructor_wet_n_pre),
+            params,
+        )
         out.append(
             Entrant(
                 driver_id=r.driver_id,
@@ -136,8 +144,14 @@ def run_backtest(
     for i, race_id in enumerate(race_ids):
         race_rows = races[races["race_id"] == race_id]
         hist_rows = race_history[race_history["race_id"] == race_id]
+        if hist_rows.empty:
+            first = race_rows.iloc[0]
+            raise StaleRatingsError(
+                f"No ratings history for {first.race_name} {int(first.season)} "
+                f"(race_id {int(race_id)}). {REBUILD_HINT}"
+            )
         entrants = entrants_for_past_race(race_rows, hist_rows, dnf_cache, params, profiles)
-        is_wet = bool(race_rows["is_wet"].iloc[0]) if "is_wet" in race_rows.columns else False
+        is_wet = bool(race_rows["is_wet"].iloc[0])
         forecast = simulate_race(
             entrants,
             params,
