@@ -1,7 +1,7 @@
 # F1 Predictions: Design
 
 Date: 2026-09-15
-Status: approved in conversation, pending written review
+Status: implemented (Phases 1 to 5 built 2026-09-15; Phase 6 review fixes in progress). Section 15 records where the build deviated from this text.
 
 ## 1. Goal
 
@@ -317,3 +317,20 @@ CLI commands are smoke-tested with Typer's test runner on the sample data.
 - villekuosmanen `F1Predict`: driver, constructor, engine Elo with Monte Carlo perturbation. Closest to this design.
 - van Kesteren and Bergkamp 2023 (JQAS): Bayesian model showing constructor explains most of the variance in results, which motivates the separate constructor rating and heavier constructor regression.
 - Kevocado `F1_Predictor`, neevj2006 `F1_Race_Predictor`: separate reliability layer, shared team noise, leakage-safe backtests.
+
+## 15. Deviations recorded during implementation
+
+Each item names the section it amends.
+
+- **3.1, 3.5**: `results.position` is not used. From the 2025 season the upstream CSV fills `position` with `positionOrder` for retired cars, so "classified" and `position` are derived from `positionText` (numeric means classified). Statuses are classified with explicit accident and mechanical whitelists; anything else unclassified is `other`.
+- **3.1**: the `safety_cars` and `driver_standings` tables are not used. Circuit incident rates come from the results table; standings are summed from the driver-race table (race plus sprint points).
+- **3.1**: `lap_times` is used only for lap-1 positions (Phase 5), stored as `lap1.parquet`.
+- **3.2**: rain is the sum of hourly precipitation over the three hours from race start (UTC `time`, 13:00 if missing); a race is wet at 0.5 mm or more. Sprint rows share their race's `is_wet`.
+- **5.5**: conditional (wet, track-type) updates are computed from the pre-race overall ratings and seed a new conditional entry at the driver's or constructor's current overall rating.
+- **6.3**: the circuit factor is the circuit's all-time DNF rate divided by the all-time global rate (same time base); the baseline rate is over the last 400 driver-race rows. Evidence count is in races: `(n_driver + n_constructor / 2) / 2`.
+- **6.5, 6.6**: the form measure's expected position is the driver's rank by pre-race strength among the race's entrants, not a nested simulation. Risk is `(accident_rate - field_rate) / field_rate` shrunk toward 0, so a driver with no accidents scores 0 rather than -1. Field baselines are taken once per race so no same-race row leaks into a driver's baseline.
+- **7**: the 2019 to 2024 fastest-lap bonus point is not simulated. The remaining-season lineup is the modal driver per seat over the last three completed races of the season.
+- **8**: the backtest uses the circuit's historical wet rate as the rain probability by default (pre-race information only); `--observed-rain` reports the upper bound with the observed race-day rainfall. Ablation variants: base, weather, track, full (weather + track), profile (everything).
+- **8.1**: tuning is coordinate descent (two passes over short candidate lists) and writes `f1pred/tuned.json`, which `load_params` layers over the defaults.
+- **9**: additional commands `season`, `profile`, and `tune`; `predict --rain` overrides the forecast; `backtest --ablate` and `--observed-rain`.
+- **10**: missing feature columns (`is_wet`, `track_type`, `lap1_position`) and ratings older than the data are hard errors with a message naming the command to run, never silent fallbacks.
