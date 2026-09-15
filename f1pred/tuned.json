@@ -1,0 +1,5 @@
+{
+  "_note": "tuned 2026-09-15 on 2015-2022, held out 2023-2025, train log loss 1.3310",
+  "k_driver": 16.0,
+  "k_constructor": 24.0
+}
