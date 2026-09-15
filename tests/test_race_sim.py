@@ -133,3 +133,38 @@ def test_partial_rain_is_a_mixture():
     wet = simulate_race(field, P, n_runs=4000, seed=3, rain_probability=1.0)
     dry = simulate_race(field, P, n_runs=4000, seed=3, rain_probability=0.0)
     assert dry.p_win[0] < half.p_win[0] < wet.p_win[0]
+
+
+def test_profile_scales_zero_reproduce_phase4():
+    field = _field()
+    field[2] = Entrant("d2", "t1", 3000.0, 3, 0.1, aggression=2.0, risk=1.0, form=1.5)
+    a = simulate_race(_field(), P, n_runs=300, seed=21)
+    b = simulate_race(field, P, n_runs=300, seed=21)
+    np.testing.assert_array_equal(a.position_matrix, b.position_matrix)
+
+
+def test_aggression_and_form_add_pace():
+    params = P.replace(aggression_scale=50.0, form_scale=50.0)
+    field = _field()
+    field[9] = Entrant("d9", "t4", 3000.0, 10, 0.1, aggression=3.0, form=3.0)
+    f = simulate_race(field, params, n_runs=3000, seed=22, use_grid=False)
+    assert f.driver_ids[int(np.argmax(f.p_win))] == "d9"
+
+
+def test_risk_widens_and_crashes():
+    params = P.replace(risk_noise_scale=1.0, risk_dnf_scale=2.0)
+    field = [Entrant(f"d{i}", f"t{i // 2}", 3000.0, i + 1, 0.1) for i in range(20)]
+    field[0] = Entrant("d0", "t0", 3000.0, 1, 0.1, risk=1.0)
+    risky = simulate_race(field, params, n_runs=4000, seed=23, use_grid=False)
+    calm = simulate_race(_field(), params, n_runs=4000, seed=23, use_grid=False)
+    assert risky.position_p90[0] > calm.position_p90[0]
+    assert risky.expected_position[0] > calm.expected_position[0]
+
+
+def test_use_profile_false_ignores_fields():
+    params = P.replace(aggression_scale=50.0, use_profile=False)
+    field = _field()
+    field[9] = Entrant("d9", "t4", 3000.0, 10, 0.1, aggression=3.0)
+    f = simulate_race(field, params, n_runs=300, seed=24)
+    g = simulate_race(_field(), params, n_runs=300, seed=24)
+    np.testing.assert_array_equal(f.position_matrix, g.position_matrix)

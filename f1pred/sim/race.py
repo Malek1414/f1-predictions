@@ -23,6 +23,10 @@ class Entrant:
     p_dnf: float
     low_confidence: bool = False
     strength_wet: float | None = None
+    # Driver profile (spec 6.5); all three are centred at 0 and inert while the scales are 0.
+    aggression: float = 0.0
+    risk: float = 0.0
+    form: float = 0.0
 
     @property
     def wet_strength(self) -> float:
@@ -81,6 +85,20 @@ def simulate_positions(
     p_dnf = np.array([e.p_dnf for e in entrants], dtype=float)
     used_grid = use_grid and all(e.grid is not None for e in entrants)
 
+    # Spec 6.5: aggression and form as pace, risk as wider driver noise and more DNFs. No extra
+    # RNG draws, and every adjustment is an exact no-op while its scale is 0.
+    profile_pace = np.zeros(n)
+    risk_noise = np.ones(n)
+    if params.use_profile:
+        aggression = np.array([e.aggression for e in entrants], dtype=float)
+        risk = np.array([e.risk for e in entrants], dtype=float)
+        form = np.array([e.form for e in entrants], dtype=float)
+        profile_pace = params.aggression_scale * aggression + params.form_scale * form
+        risk_noise = np.clip(1.0 + params.risk_noise_scale * risk, 0.5, 3.0)
+        risk_dnf = 1.0 + params.risk_dnf_scale * risk
+        # Clip only where the multiplier bites so a certain (or impossible) DNF stays exact.
+        p_dnf = np.where(risk_dnf != 1.0, np.clip(p_dnf * risk_dnf, 0.01, 0.95), p_dnf)
+
     if rain_probability > 0.0:
         wet = rng.random(n_runs) < rain_probability
     else:
@@ -101,9 +119,15 @@ def simulate_positions(
         grid_term = np.zeros(n)
         # A uniform draw over n grid slots has std n / sqrt(12); fold that into driver noise.
         sigma_driver = float(np.sqrt(params.sigma_driver**2 + (params.grid_bonus * n) ** 2 / 12))
-    driver_noise = rng.normal(0.0, sigma_driver, size=(n_runs, n))
+    driver_noise = rng.normal(0.0, sigma_driver, size=(n_runs, n)) * risk_noise[None, :]
 
-    performance = strength_run + grid_term + team_noise * noise_scale + driver_noise * noise_scale
+    performance = (
+        strength_run
+        + grid_term
+        + profile_pace[None, :]
+        + team_noise * noise_scale
+        + driver_noise * noise_scale
+    )
     # Clip only the wet branch so a dry run keeps p_dnf exactly (a certain DNF stays certain).
     p_dnf_wet = np.clip(p_dnf * params.wet_dnf_factor, 0.0, 0.95)
     p_dnf_run = np.where(wet[:, None], p_dnf_wet[None, :], p_dnf[None, :])
