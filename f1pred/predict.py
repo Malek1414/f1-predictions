@@ -2,15 +2,20 @@
 
 from __future__ import annotations
 
+import logging
 from dataclasses import dataclass
 
 import pandas as pd
 
 from f1pred.backtest.run import entrants_for_past_race
 from f1pred.config import ModelParams
-from f1pred.ratings.history import RatingState, state_for_season, strength
+from f1pred.data.track_types import load_track_types, track_type_for
+from f1pred.data.weather import circuit_wet_rate, fetch_rain_probability
+from f1pred.ratings.history import RatingState, state_for_season, state_strengths
 from f1pred.sim.dnf import dnf_probability
 from f1pred.sim.race import Entrant
+
+log = logging.getLogger(__name__)
 
 NO_QUALIFYING_NOTE = "No qualifying data yet; running without grid"
 
@@ -30,6 +35,10 @@ class RaceRef:
     circuit_id: str
     date: pd.Timestamp
     has_results: bool
+    time: str | None
+    lat: float
+    lng: float
+    track_type: str
 
 
 @dataclass
@@ -39,10 +48,13 @@ class PredictionInputs:
     names: dict[str, str]
     use_grid: bool
     note: str | None
+    rain_probability: float
+    rain_source: str  # observed | forecast | historical | override | disabled
 
 
 def _season_races(raw: dict, season: int) -> pd.DataFrame:
-    races = raw["races"].merge(raw["circuits"][["circuitId", "circuitRef"]], on="circuitId")
+    circuits = raw["circuits"][["circuitId", "circuitRef", "lat", "lng"]]
+    races = raw["races"].merge(circuits, on="circuitId")
     return races[races["year"] == season].sort_values("round")
 
 
@@ -73,14 +85,19 @@ def resolve_race(
     r = match.iloc[0]
     race_id = int(r.raceId)
     has_results = bool(((table["race_id"] == race_id) & (~table["is_sprint"])).any())
+    circuit_id = str(r["circuitRef"])
     return RaceRef(
         race_id=race_id,
         season=season,
         round=int(r["round"]),
         name=str(r["name"]),
-        circuit_id=str(r["circuitRef"]),
+        circuit_id=circuit_id,
         date=pd.Timestamp(r["date"]),
         has_results=has_results,
+        time=None if pd.isna(r["time"]) else str(r["time"]),
+        lat=float(r["lat"]),
+        lng=float(r["lng"]),
+        track_type=track_type_for(circuit_id, load_track_types()),
     )
 
 
@@ -110,21 +127,50 @@ def _future_entrants(
         use_grid, note = False, NO_QUALIFYING_NOTE
     entrants, names = [], {}
     for driver_id, constructor_id, grid, name in rows:
+        dry, wet = state_strengths(season_state, driver_id, constructor_id, ref.track_type, params)
         entrants.append(
             Entrant(
                 driver_id=driver_id,
                 constructor_id=constructor_id,
-                strength=strength(season_state, driver_id, constructor_id, params),
+                strength=dry,
                 grid=grid,
                 p_dnf=dnf_probability(
                     table, driver_id, constructor_id, ref.circuit_id, ref.date, params
                 ),
                 low_confidence=season_state.driver_races.get(driver_id, 0)
                 < params.min_races_for_confidence,
+                strength_wet=wet,
             )
         )
         names[driver_id] = name
     return entrants, names, use_grid, note
+
+
+def _rain_for_race(
+    table: pd.DataFrame, race: RaceRef, params: ModelParams, override: float | None
+) -> tuple[float, str]:
+    """Spec 6.7 and 10: observed for a past race; forecast, else the circuit's historical rate."""
+    if override is not None:
+        return float(override), "override"
+    if not params.use_weather:
+        return 0.0, "disabled"
+    if race.has_results:
+        rows = table[(table["race_id"] == race.race_id) & (~table["is_sprint"])]
+        wet = bool(rows["is_wet"].iloc[0]) if "is_wet" in rows.columns else False
+        return (1.0 if wet else 0.0), "observed"
+    prob = fetch_rain_probability(
+        race.lat, race.lng, race.date, race.time, params.race_window_hours
+    )
+    if prob is not None:
+        return float(prob), "forecast"
+    rate = circuit_wet_rate(table, race.circuit_id, race.date)
+    log.warning(
+        "no rain forecast for %s %s; using historical wet rate %.0f%%",
+        race.name,
+        race.date.date(),
+        100 * rate,
+    )
+    return rate, "historical"
 
 
 def build_prediction_inputs(
@@ -135,7 +181,9 @@ def build_prediction_inputs(
     race: RaceRef,
     params: ModelParams,
     use_grid: bool = True,
+    rain_probability: float | None = None,
 ) -> PredictionInputs:
+    rain, source = _rain_for_race(table, race, params, rain_probability)
     if race.has_results:
         rows = table[(table["race_id"] == race.race_id) & (~table["is_sprint"])]
         hist = history[(history["race_id"] == race.race_id) & (~history["is_sprint"])]
@@ -146,6 +194,8 @@ def build_prediction_inputs(
             for r in rows.itertuples(index=False)
         }
         entrants = entrants_for_past_race(rows, hist, dnf, params)
-        return PredictionInputs(race, entrants, _names_from_table(rows), use_grid, None)
+        return PredictionInputs(
+            race, entrants, _names_from_table(rows), use_grid, None, rain, source
+        )
     entrants, names, grid_ok, note = _future_entrants(raw, table, state, race, params)
-    return PredictionInputs(race, entrants, names, use_grid and grid_ok, note)
+    return PredictionInputs(race, entrants, names, use_grid and grid_ok, note, rain, source)
