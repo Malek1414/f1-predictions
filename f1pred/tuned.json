@@ -1,5 +1,5 @@
 {
-  "_note": "tuned 2026-09-15 on 2015-2022, held out 2023-2025, train log loss 1.3342",
+  "_note": "tuned 2026-09-15 on 2015-2022, held out 2023-2025, train log loss 1.3337",
   "k_driver": 32.0,
   "regress_constructor": 0.3,
   "sigma_team": 40.0,
@@ -7,5 +7,5 @@
   "shrink_wet": 16.0,
   "shrink_track": 16.0,
   "wet_noise_factor": 1.0,
-  "wet_dnf_factor": 1.0
+  "aggression_scale": 10.0
 }
