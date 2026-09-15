@@ -35,3 +35,11 @@ def test_load_params_ignores_underscore_keys(tmp_path):
     path = tmp_path / "tuned.json"
     path.write_text(json.dumps({"_note": "x", "k_driver": 30.0}))
     assert load_params(path).k_driver == 30.0
+
+
+def test_phase4_defaults():
+    p = DEFAULT_PARAMS
+    assert p.use_weather and p.use_track
+    assert p.wet_threshold_mm == 0.5 and p.race_window_hours == 3
+    assert p.shrink_wet == 8.0 and p.shrink_track == 8.0
+    assert p.wet_noise_factor == 1.5 and p.wet_dnf_factor == 1.5

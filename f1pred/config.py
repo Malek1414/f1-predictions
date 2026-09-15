@@ -38,6 +38,15 @@ class ModelParams:
     circuit_min_rows: int = 40
     circuit_factor_min: float = 0.5
     circuit_factor_max: float = 2.0
+    # Weather and track (Phase 4)
+    use_weather: bool = True
+    use_track: bool = True
+    wet_threshold_mm: float = 0.5
+    race_window_hours: int = 3
+    shrink_wet: float = 8.0
+    shrink_track: float = 8.0
+    wet_noise_factor: float = 1.5
+    wet_dnf_factor: float = 1.5
 
     def replace(self, **changes: object) -> ModelParams:
         return dataclasses.replace(self, **changes)
