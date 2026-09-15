@@ -113,7 +113,8 @@ def test_remaining_calendar_and_standings_on_sample(raw_sample, driver_race):
 def test_season_entrants_on_sample(driver_race):
     _, state = replay(driver_race, P)
     race = RemainingRace(999, 1, "Next", "bahrain", pd.Timestamp("2025-03-16"), False)
-    ents = season_entrants(driver_race, state, 2025, race, P)
+    # Phase 3 arithmetic holds with track ratings off (Phase 4 adds a track-type shrink).
+    ents = season_entrants(driver_race, state, 2025, race, P.replace(use_track=False))
     assert len(ents) == 20 and all(e.grid is None for e in ents)
     e = next(x for x in ents if x.driver_id == "max_verstappen")
     assert e.strength == pytest.approx(
@@ -123,3 +124,35 @@ def test_season_entrants_on_sample(driver_race):
         + (state.constructor["red_bull"] - 1500) * 0.6
     )
     assert 0.01 <= e.p_dnf <= 0.9
+
+
+def test_rain_by_race_changes_outcome():
+    ents = [Entrant(f"d{i}", f"t{i // 2}", 3000.0, None, 0.0) for i in range(4)]
+    ents[3] = Entrant("d3", "t1", 3000.0, None, 0.0, strength_wet=3800.0)
+    remaining = [_race(0)]
+    pts = {e.driver_id: 0.0 for e in ents}
+    mapping = {e.driver_id: e.constructor_id for e in ents}
+    dry = simulate_season(
+        2025, remaining, [ents], pts, {}, mapping, P, n_runs=400, seed=0, rain_by_race=[0.0]
+    )
+    wet = simulate_season(
+        2025, remaining, [ents], pts, {}, mapping, P, n_runs=400, seed=0, rain_by_race=[1.0]
+    )
+    assert (
+        wet.p_driver_title[wet.driver_ids.index("d3")]
+        > dry.p_driver_title[dry.driver_ids.index("d3")]
+    )
+    with pytest.raises(ValueError):
+        simulate_season(
+            2025, remaining, [ents], pts, {}, mapping, P, n_runs=10, rain_by_race=[0.0, 0.0]
+        )
+
+
+def test_season_entrants_carry_wet_strength(driver_race):
+    _, state = replay(driver_race, P)
+    race = RemainingRace(
+        999, 1, "Next", "interlagos", pd.Timestamp("2025-03-16"), False, track_type="mixed"
+    )
+    ents = season_entrants(driver_race, state, 2025, race, P)
+    assert all(e.strength_wet is not None for e in ents)
+    assert any(e.strength_wet != e.strength for e in ents)

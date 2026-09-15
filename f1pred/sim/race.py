@@ -22,6 +22,11 @@ class Entrant:
     grid: int | None
     p_dnf: float
     low_confidence: bool = False
+    strength_wet: float | None = None
+
+    @property
+    def wet_strength(self) -> float:
+        return self.strength if self.strength_wet is None else self.strength_wet
 
 
 @dataclass
@@ -36,6 +41,7 @@ class RaceForecast:
     position_matrix: np.ndarray  # (n_entrants, n_positions), row i = P(driver i finishes k+1)
     n_runs: int
     used_grid: bool
+    rain_probability: float = 0.0
 
     def as_frame(self) -> pd.DataFrame:
         df = pd.DataFrame(
@@ -62,12 +68,26 @@ def simulate_positions(
     n_runs: int,
     rng: np.random.Generator,
     use_grid: bool = True,
+    rain_probability: float = 0.0,
 ) -> tuple[np.ndarray, bool]:
-    """One finishing order per run. Returns (positions of shape (n_runs, n), used_grid)."""
+    """One finishing order per run. Returns (positions of shape (n_runs, n), used_grid).
+
+    Spec 6.7: each run first draws wet ~ Bernoulli(rain_probability). Wet runs use the wet
+    strength, scale both noise terms by wet_noise_factor and DNF odds by wet_dnf_factor.
+    With rain_probability == 0 the draw is skipped so earlier seeds reproduce exactly.
+    """
     n = len(entrants)
     strength = np.array([e.strength for e in entrants], dtype=float)
     p_dnf = np.array([e.p_dnf for e in entrants], dtype=float)
     used_grid = use_grid and all(e.grid is not None for e in entrants)
+
+    if rain_probability > 0.0:
+        wet = rng.random(n_runs) < rain_probability
+    else:
+        wet = np.zeros(n_runs, dtype=bool)
+    strength_wet = np.array([e.wet_strength for e in entrants], dtype=float)
+    strength_run = np.where(wet[:, None], strength_wet[None, :], strength[None, :])
+    noise_scale = np.where(wet, params.wet_noise_factor, 1.0)[:, None]
 
     teams = sorted({e.constructor_id for e in entrants})
     team_idx = np.array([teams.index(e.constructor_id) for e in entrants])
@@ -83,8 +103,11 @@ def simulate_positions(
         sigma_driver = float(np.sqrt(params.sigma_driver**2 + (params.grid_bonus * n) ** 2 / 12))
     driver_noise = rng.normal(0.0, sigma_driver, size=(n_runs, n))
 
-    performance = strength + grid_term + team_noise + driver_noise
-    dnf = rng.random((n_runs, n)) < p_dnf
+    performance = strength_run + grid_term + team_noise * noise_scale + driver_noise * noise_scale
+    # Clip only the wet branch so a dry run keeps p_dnf exactly (a certain DNF stays certain).
+    p_dnf_wet = np.clip(p_dnf * params.wet_dnf_factor, 0.0, 0.95)
+    p_dnf_run = np.where(wet[:, None], p_dnf_wet[None, :], p_dnf[None, :])
+    dnf = rng.random((n_runs, n)) < p_dnf_run
     key = np.where(dnf, DNF_KEY + rng.random((n_runs, n)), performance)
 
     order = np.argsort(-key, axis=1, kind="stable")  # order[r, k] = entrant index at position k+1
@@ -99,10 +122,13 @@ def simulate_race(
     n_runs: int = 10_000,
     seed: int | None = None,
     use_grid: bool = True,
+    rain_probability: float = 0.0,
 ) -> RaceForecast:
     rng = np.random.default_rng(seed)
     n = len(entrants)
-    positions, used_grid = simulate_positions(entrants, params, n_runs, rng, use_grid)
+    positions, used_grid = simulate_positions(
+        entrants, params, n_runs, rng, use_grid, rain_probability=rain_probability
+    )
     position_matrix = (
         np.stack([np.bincount(positions[:, i] - 1, minlength=n) for i in range(n)]).astype(float)
         / n_runs
@@ -120,4 +146,5 @@ def simulate_race(
         position_matrix=position_matrix,
         n_runs=n_runs,
         used_grid=used_grid,
+        rain_probability=rain_probability,
     )

@@ -9,7 +9,7 @@ import numpy as np
 import pandas as pd
 
 from f1pred.config import ModelParams
-from f1pred.ratings.history import RatingState, state_for_season, strength
+from f1pred.ratings.history import RatingState, state_for_season, state_strengths
 from f1pred.sim.dnf import dnf_probability
 from f1pred.sim.points import points_for_positions, race_points, sprint_points
 from f1pred.sim.race import Entrant, simulate_positions
@@ -23,6 +23,8 @@ class RemainingRace:
     circuit_id: str
     date: pd.Timestamp
     has_sprint: bool
+    track_type: str = "mixed"
+    rain_probability: float = 0.0
 
 
 @dataclass
@@ -112,20 +114,26 @@ def season_entrants(
     races = table[~table["is_sprint"]]
     latest_id = races.sort_values("date")["race_id"].iloc[-1]
     latest = races[races["race_id"] == latest_id]
-    return [
-        Entrant(
-            driver_id=r.driver_id,
-            constructor_id=r.constructor_id,
-            strength=strength(season_state, r.driver_id, r.constructor_id, params),
-            grid=None,
-            p_dnf=dnf_probability(
-                table, r.driver_id, r.constructor_id, race.circuit_id, race.date, params
-            ),
-            low_confidence=season_state.driver_races.get(r.driver_id, 0)
-            < params.min_races_for_confidence,
+    out = []
+    for r in latest.itertuples(index=False):
+        dry, wet = state_strengths(
+            season_state, r.driver_id, r.constructor_id, race.track_type, params
         )
-        for r in latest.itertuples(index=False)
-    ]
+        out.append(
+            Entrant(
+                driver_id=r.driver_id,
+                constructor_id=r.constructor_id,
+                strength=dry,
+                grid=None,
+                p_dnf=dnf_probability(
+                    table, r.driver_id, r.constructor_id, race.circuit_id, race.date, params
+                ),
+                low_confidence=season_state.driver_races.get(r.driver_id, 0)
+                < params.min_races_for_confidence,
+                strength_wet=wet,
+            )
+        )
+    return out
 
 
 def _ordered_ids(points: Mapping[str, float], extra: set[str]) -> list[str]:
@@ -143,9 +151,14 @@ def simulate_season(
     params: ModelParams,
     n_runs: int = 2000,
     seed: int | None = None,
+    rain_by_race: list[float] | None = None,
 ) -> SeasonForecast:
     if len(remaining) != len(entrants_by_race):
         raise ValueError("remaining and entrants_by_race must have the same length")
+    if rain_by_race is None:
+        rain_by_race = [0.0] * len(remaining)
+    if len(rain_by_race) != len(remaining):
+        raise ValueError("rain_by_race must have one entry per remaining race")
     rng = np.random.default_rng(seed)
 
     entrant_drivers = {e.driver_id for ents in entrants_by_race for e in ents}
@@ -167,12 +180,16 @@ def simulate_season(
     current_d = np.array([driver_points.get(d, 0.0) for d in driver_ids], dtype=float)
     totals = np.tile(current_d, (n_runs, 1))
     race_table, sprint_table = race_points(season), sprint_points(season)
-    for race, ents in zip(remaining, entrants_by_race, strict=True):
+    for race, ents, rain in zip(remaining, entrants_by_race, rain_by_race, strict=True):
         cols = np.array([d_idx[e.driver_id] for e in ents])
         if race.has_sprint and sprint_table.size:
-            pos, _ = simulate_positions(ents, params, n_runs, rng, use_grid=False)
+            pos, _ = simulate_positions(
+                ents, params, n_runs, rng, use_grid=False, rain_probability=rain
+            )
             totals[:, cols] += points_for_positions(pos, sprint_table)
-        pos, _ = simulate_positions(ents, params, n_runs, rng, use_grid=False)
+        pos, _ = simulate_positions(
+            ents, params, n_runs, rng, use_grid=False, rain_probability=rain
+        )
         totals[:, cols] += points_for_positions(pos, race_table)
 
     # Constructors: points already held (which may include drivers no longer mapped) plus

@@ -99,3 +99,37 @@ def test_simulate_race_matches_positions_with_same_seed():
     positions, _ = simulate_positions(_field(), P, 300, np.random.default_rng(11))
     p_win = (positions == 1).mean(axis=0)
     np.testing.assert_allclose(p_win, forecast.p_win)
+
+
+def test_rain_zero_reproduces_phase1_draws():
+    a = simulate_race(_field(), P, n_runs=300, seed=5)
+    b = simulate_race(_field(), P, n_runs=300, seed=5, rain_probability=0.0)
+    np.testing.assert_array_equal(a.position_matrix, b.position_matrix)
+
+
+def test_wet_specialist_wins_more_in_rain():
+    field = [Entrant(f"d{i}", f"t{i // 2}", 3000.0, i + 1, 0.05) for i in range(20)]
+    field[7] = Entrant("d7", "t3", 3000.0, 8, 0.05, strength_wet=3400.0)
+    dry = simulate_race(field, P, n_runs=3000, seed=1, rain_probability=0.0)
+    wet = simulate_race(field, P, n_runs=3000, seed=1, rain_probability=1.0)
+    assert wet.p_win[7] > 0.5 > dry.p_win[7]
+    assert wet.rain_probability == 1.0
+
+
+def test_rain_raises_dnfs_and_spread():
+    field = _field(p_dnf=0.2)
+    dry_pos, _ = simulate_positions(field, P, 4000, np.random.default_rng(2), rain_probability=0.0)
+    wet_pos, _ = simulate_positions(field, P, 4000, np.random.default_rng(2), rain_probability=1.0)
+    # With everyone equal, more DNFs and wider noise in the wet push the pole sitter out of the
+    # top 10 more often. ("Finishes last" is not monotone in the DNF rate: more DNFs also means
+    # more cars competing for last place, so that share barely moves.)
+    assert (wet_pos[:, 0] > 10).mean() > (dry_pos[:, 0] > 10).mean()
+
+
+def test_partial_rain_is_a_mixture():
+    field = [Entrant(f"d{i}", f"t{i // 2}", 3000.0, i + 1, 0.0) for i in range(20)]
+    field[0] = Entrant("d0", "t0", 3000.0, 1, 0.0, strength_wet=3600.0)
+    half = simulate_race(field, P, n_runs=4000, seed=3, rain_probability=0.5)
+    wet = simulate_race(field, P, n_runs=4000, seed=3, rain_probability=1.0)
+    dry = simulate_race(field, P, n_runs=4000, seed=3, rain_probability=0.0)
+    assert dry.p_win[0] < half.p_win[0] < wet.p_win[0]
