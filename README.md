@@ -15,38 +15,51 @@ mirror of the Ergast schema.
 `f1pred predict --season 2026 --round 15`, run before qualifying (so without a grid):
 
 ```text
-No qualifying data yet; running without grid
+No qualifying data yet; lineup carried over from Spanish Grand Prix 2026 and grid ignored
 Rain chance: 10% (forecast)
                     Azerbaijan Grand Prix 2026 (round 15)
  #   Driver                    Win   Podium   Points   Exp. pos   P10-P90
- 1   Andrea Kimi Antonelli   17.9%    45.7%    87.5%        5.3      1-11
- 2   George Russell          17.9%    44.4%    85.3%        5.6      1-12
- 3   Max Verstappen          16.2%    41.2%    85.9%        5.6      1-12
- 4   Lando Norris            13.0%    35.3%    82.2%        6.2      1-13
- 5   Oscar Piastri            7.8%    25.1%    74.7%        7.5      2-15
- 6   Charles Leclerc          7.5%    25.8%    75.1%        7.5      2-15
- 7   Lewis Hamilton           5.3%    19.0%    68.2%        8.5      2-16
- 8   Carlos Sainz             2.5%     8.7%    44.0%       11.5      4-19
- 9   Liam Lawson              2.0%     9.4%    50.5%       10.7      4-18
-10   Arvid Lindblad           1.9%     7.9%    45.4%       11.2      4-19
-11   Alexander Albon          1.6%     5.4%    30.3%       13.3      5-20
-12   Franco Colapinto         1.2%     6.0%    40.7%       12.0      5-19
-13   Fernando Alonso          1.0%     3.4%    26.5%       13.9      6-20
-14   Gabriel Bortoleto        0.8%     4.1%    33.9%       12.9      5-20
-15   Yuki Tsunoda             0.8%     3.2%    30.1%       13.4      6-20
-16   Esteban Ocon             0.7%     3.8%    31.2%       13.2      6-20
-17   Pierre Gasly             0.7%     4.0%    33.7%       13.0      6-20
-18   Oliver Bearman           0.5%     3.0%    25.9%       14.1      7-21
-19   Nico Hülkenberg          0.4%     2.6%    24.1%       14.4      7-21
-20   Sergio Pérez             0.2%     1.1%    13.5%       16.3      9-22
-21   Lance Stroll             0.1%     0.7%     7.7%       17.8     12-22
-22   Valtteri Bottas          0.0%     0.2%     3.7%       19.0     14-22
+ 1   Max Verstappen          20.3%    47.7%    79.1%        6.6      1-20
+ 2   Lando Norris            18.2%    46.2%    81.7%        6.3      1-19
+ 3   George Russell          15.5%    41.8%    80.8%        6.5      1-19
+ 4   Oscar Piastri           11.5%    35.6%    77.0%        7.5      1-20
+ 5   Andrea Kimi Antonelli   10.7%    35.7%    85.8%        6.1      1-13
+ 6   Charles Leclerc          8.6%    28.3%    69.5%        8.7      2-21
+ 7   Lewis Hamilton           6.4%    23.3%    74.0%        8.2      2-20
+ 8   Liam Lawson              2.1%    11.5%    66.3%        9.5      3-19
+ 9   Carlos Sainz             1.3%     4.4%    34.7%       13.0      6-21
+10   Arvid Lindblad           1.1%     5.2%    53.5%       10.7      5-18
+11   Alexander Albon          0.9%     2.6%    24.9%       14.2      7-21
+12   Pierre Gasly             0.5%     3.2%    42.9%       11.6      6-18
+13   Franco Colapinto         0.5%     2.7%    40.1%       11.7      6-17
+14   Oliver Bearman           0.4%     1.9%    27.7%       13.5      7-20
+15   Nico Hülkenberg          0.4%     1.8%    29.9%       13.5      7-21
+16   Yuki Tsunoda             0.4%     1.8%    36.0%       12.2      7-18
+17   Gabriel Bortoleto        0.4%     2.1%    32.7%       13.2      7-20
+18   Esteban Ocon             0.4%     1.8%    27.6%       13.2      7-19
+19   Fernando Alonso          0.3%     1.7%    21.9%       14.4      8-21
+20   Lance Stroll             0.1%     0.4%     5.8%       17.5     12-22
+21   Sergio Pérez             0.1%     0.3%     5.3%       17.3     12-21
+22   Valtteri Bottas          0.0%     0.1%     2.6%       17.6     14-21
                   * fewer than 5 rated races: low confidence
 ```
 
 The rain line is the Open-Meteo forecast for the three hours from the race start; it becomes the
 share of simulated runs that are wet. Before the forecast horizon, or when Open-Meteo cannot be
-reached, the circuit's historical wet rate is used instead and the line says so.
+reached, the circuit's historical wet rate is used instead and the line says so. The wide
+P10-P90 bands at the top are the retirement chance at work: 2026 has been an 18% DNF season and
+Baku's history multiplies that by 1.22, so even the favourites reach P20 in a tenth of runs.
+
+The ratings behind it, after the 2026 Spanish Grand Prix (`f1pred ratings build`):
+
+```text
+ #   Driver             Rating       #   Constructor   Rating
+ 1   Max Verstappen     1754.4       1   mercedes      1740.2
+ 2   Lando Norris       1661.8       2   ferrari       1662.8
+ 3   Charles Leclerc    1651.0       3   mclaren       1661.5
+ 4   George Russell     1648.9
+ 5   Lewis Hamilton     1618.9
+```
 
 ![Win probability](docs/results/example-win.png)
 
@@ -60,15 +73,18 @@ rest of the calendar 2,000 times and counts who ends up on top:
 ```text
            2026 drivers' championship (9 races left, 2,000 runs)
  #   Driver                  Points now   Exp. points    Title    Top 3
- 1   Andrea Kimi Antonelli          292           393    98.5%   100.0%
- 2   George Russell                 211           319     1.4%    92.0%
- 3   Lando Norris                   186           283     0.1%    51.2%
- 4   Lewis Hamilton                 191           273     0.0%    31.0%
- 5   Max Verstappen                 145           255     0.0%    13.3%
- 6   Charles Leclerc                167           255     0.0%    12.4%
- 7   Oscar Piastri                  120           188     0.0%     0.0%
- 8   Liam Lawson                     59            93     0.0%     0.0%
+ 1   Andrea Kimi Antonelli          292           391    98.6%   100.0%
+ 2   George Russell                 211           321     1.2%    90.8%
+ 3   Lando Norris                   186           298     0.2%    66.0%
+ 4   Lewis Hamilton                 191           277     0.0%    27.9%
+ 5   Charles Leclerc                167           254     0.0%     7.2%
+ 6   Max Verstappen                 145           254     0.0%     8.0%
+ 7   Oscar Piastri                  120           210     0.0%     0.3%
+ 8   Liam Lawson                     59           101     0.0%     0.0%
 ```
+
+The lineup for the remaining races is the modal driver per seat over the last three completed
+races, so a one-off stand-in is not simulated for the rest of the year.
 
 ![Championship odds](docs/results/example-title.png)
 
@@ -80,26 +96,24 @@ bottom five by aggression:
 
 ```text
  Driver                  Aggression    Risk    Form   Races
- Fernando Alonso              +0.99   +0.00   +0.94      20
- Esteban Ocon                 +0.93   +0.00   +0.25      20
- Carlos Sainz                 +0.79   +0.00   -0.31      20
- Sergio Pérez                 +0.77   +6.67   +0.50      19
- Lance Stroll                 +0.59   +0.00   +0.94      20
+ Fernando Alonso              +0.82   -0.67   +0.67      20
+ Carlos Sainz                 +0.57   +0.67   +0.20      20
+ Esteban Ocon                 +0.52   -0.67   +0.93      20
+ Sergio Pérez                 +0.44   +0.67   +1.00      19
+ Lance Stroll                 +0.37   +0.67   +0.92      19
  ...
- Gabriel Bortoleto            -0.52   +0.00   +1.00      20
- Lando Norris                 -0.72   +0.00   +0.50      20
- Nico Hülkenberg              -1.22   +0.00   +1.12      20
- George Russell               -1.34   +0.00   -2.19      20
- Oscar Piastri                -1.40   +0.00   -0.81      20
+ Andrea Kimi Antonelli        -0.33   -0.67   +0.94      20
+ Valtteri Bottas              -0.72   +0.00   +1.14      20
+ Gabriel Bortoleto            -0.79   +0.67   +0.88      18
+ Nico Hülkenberg              -0.92   +0.00   +0.33      19
+ George Russell               -0.92   +0.00   -0.93      19
 ```
 
 Aggression is places gained relative to the field, so it rewards midfield drivers who start
 behind and come through, and penalises front-row starters who have nowhere to go but back.
-Risk is nearly empty on this grid because the data source has recorded a classified finishing
-position for every driver since the start of 2025, retirements included, so no 2025 or 2026
-race carries an accident-type DNF; the two non-zero values (Pérez, Bottas) are drivers whose
-20-race windows reach back into 2024, measured against a near-zero field rate. Treat the risk
-column as unreliable until the source records retirements again.
+Risk is the accident-type retirement rate against the field's; it is populated again now that
+retirements are classified from `positionText` (see the changelog), and over a 20-race window
+it moves in steps because a driver has zero, one or two accidents in that span.
 
 ## How it works
 
@@ -155,20 +169,21 @@ default to zero and are set by the tuner; `f1pred profile` prints the current nu
 ## Backtest results
 
 Parameters were tuned by coordinate descent on 2015 to 2022 (`f1pred tune`) with the weather,
-track and driver-profile knobs in the grid. It chose `k_driver = 32`, `sigma_team = 40`,
-`grid_bonus = 12`, `regress_constructor = 0.3`, `shrink_wet = shrink_track = 16`,
-`wet_noise_factor = 1.0` (no extra noise in the wet) and `aggression_scale = 10`; the risk and
-form scales stayed at 0 and everything else at its default, including `wet_dnf_factor = 1.5`,
-which the Phase 4 tune had set to 1.0 (the two values differ by less than 0.001 in training
-log loss, so the pick is noise). The seasons below were never seen by the tuner. Each race is
-predicted from the ratings, DNF rates, grid, observed weather and driver profile that were
-known before it started. See [docs/backtesting.md](docs/backtesting.md).
+track and driver-profile knobs in the grid, after the review fixes listed in the changelog. It
+chose `k_constructor = 48`, `sigma_team = 40`, `sigma_driver = 60`, `grid_bonus = 12`,
+`regress_constructor = 0.3`, `shrink_wet = shrink_track = 16`, `wet_dnf_factor = 1.0`,
+`aggression_scale = 5` and `risk_dnf_scale = 0.25`; everything else stayed at its default,
+including `k_driver = 24`, `wet_noise_factor = 1.5` and the risk-noise and form scales at 0.
+Training log loss was 1.3095. The seasons below were never seen by the tuner. Each race is
+predicted from the ratings, DNF rates, grid, driver profile and the circuit's pre-race wet rate
+that were known before it started; the rainfall that actually fell is not used. See
+[docs/backtesting.md](docs/backtesting.md).
 
 | Season | Races | Log loss model | Log loss pole | Log loss uniform | Brier model | Brier pole | Brier uniform | Spearman model | Spearman pole |
 |-------:|------:|---------------:|--------------:|-----------------:|------------:|-----------:|--------------:|---------------:|--------------:|
-| 2023 | 22 | 0.59 | 1.98 | 3.00 | 0.08 | 0.09 | 0.13 | 0.79 | 0.71 |
-| 2024 | 24 | 1.76 | 2.89 | 2.99 | 0.08 | 0.09 | 0.13 | 0.80 | 0.78 |
-| 2025 | 24 | 1.35 | 1.61 | 2.99 | 0.07 | 0.06 | 0.13 | 0.63 | 0.65 |
+| 2023 | 22 | 0.55 | 1.98 | 3.00 | 0.08 | 0.09 | 0.13 | 0.79 | 0.71 |
+| 2024 | 24 | 1.74 | 2.89 | 2.99 | 0.08 | 0.09 | 0.13 | 0.80 | 0.78 |
+| 2025 | 24 | 1.44 | 1.61 | 2.99 | 0.07 | 0.06 | 0.13 | 0.73 | 0.74 |
 
 Log loss is the surprise at the actual winner (lower is better), Brier the squared error of the
 podium probabilities (lower is better), Spearman the rank correlation of expected versus actual
@@ -185,29 +200,48 @@ pole baseline edges it on podium Brier and Spearman.
 switched off and on, using the tuned parameters throughout (`base` is the Phase 3 model with
 those parameters). `full` is weather plus track type with the profile off; `profile` is
 everything, and is what `f1pred predict` runs. Log loss is the winner score, Brier the podium
-score; lower is better for both.
+score; lower is better for both. The first table is the default, honest mode: every race gets
+the circuit's wet rate as known before it. The second (`--observed-rain`) tells the weather
+variants which races were actually wet, an upper bound on what a perfect forecast could add.
+
+Pre-race rain (`rain_mode = historical`, the default):
 
 | Variant | Log loss 2023 | 2024 | 2025 | All 70 | Brier 2023 | 2024 | 2025 | All 70 |
 |:--------|--------------:|-----:|-----:|-------:|-----------:|-----:|-----:|-------:|
-| base (none) | 0.434 | 1.935 | 1.217 | 1.217 | 0.0806 | 0.0822 | 0.0682 | 0.0769 |
-| weather | 0.442 | 1.908 | 1.240 | 1.218 | 0.0805 | 0.0806 | 0.0692 | 0.0767 |
-| track | 0.568 | 1.679 | 1.280 | 1.193 | 0.0793 | 0.0802 | 0.0661 | 0.0751 |
-| full (weather + track) | 0.594 | 1.741 | 1.326 | 1.238 | 0.0795 | 0.0811 | 0.0682 | 0.0762 |
-| profile (everything, the default) | 0.587 | 1.760 | 1.347 | 1.250 | 0.0796 | 0.0813 | 0.0694 | 0.0767 |
+| base (none) | 0.401 | 2.184 | 1.444 | 1.370 | 0.0832 | 0.0842 | 0.0698 | 0.0789 |
+| weather | 0.430 | 1.886 | 1.429 | 1.271 | 0.0812 | 0.0823 | 0.0681 | 0.0771 |
+| track | 0.476 | 1.827 | 1.386 | 1.251 | 0.0827 | 0.0817 | 0.0710 | 0.0783 |
+| full (weather + track) | 0.560 | 1.724 | 1.427 | 1.256 | 0.0808 | 0.0808 | 0.0698 | 0.0770 |
+| profile (everything, the default) | 0.552 | 1.738 | 1.443 | 1.264 | 0.0804 | 0.0811 | 0.0707 | 0.0773 |
 
-Track type is still the only addition that improves the 70-race averages, and still unevenly:
-it cuts 2024's winner log loss from 1.93 to 1.68 but makes 2023 and 2025 worse. Weather
-remains a wash (the tuner keeps the wet noise factor at 1.0, and 52 wet races since 2010 move
-the wet ratings very little).
+Observed rain (`rain_mode = observed`, `--observed-rain`; `base` and `track` do not use rain
+and are unchanged):
 
-The driver profile did not help. Of its four scales the tuner kept only `aggression_scale = 10`
-above zero, and that bought 0.0013 of training log loss; on the held-out seasons the `profile`
-row is 0.012 worse than `full` on winner log loss over 70 races (better in 2023, worse in 2024
-and 2025) and 0.0005 worse on podium Brier. Risk and form were set to zero by the search, so
-they are computed and printed but never enter the simulation. The profile stays on by default
-because that is what the tuner chose on the training seasons, but the honest summary is that
-the grid, the overall ratings and the track-type ratings already carry the signal, and a
-20-race window of places gained is too noisy to add to it.
+| Variant | Log loss 2023 | 2024 | 2025 | All 70 | Brier 2023 | 2024 | 2025 | All 70 |
+|:--------|--------------:|-----:|-----:|-------:|-----------:|-----:|-----:|-------:|
+| base (none) | 0.401 | 2.184 | 1.444 | 1.370 | 0.0832 | 0.0842 | 0.0698 | 0.0789 |
+| weather | 0.416 | 2.063 | 1.478 | 1.345 | 0.0824 | 0.0817 | 0.0708 | 0.0782 |
+| track | 0.476 | 1.827 | 1.386 | 1.251 | 0.0827 | 0.0817 | 0.0710 | 0.0783 |
+| full (weather + track) | 0.518 | 1.873 | 1.428 | 1.295 | 0.0823 | 0.0827 | 0.0722 | 0.0790 |
+| profile (everything, the default) | 0.512 | 1.894 | 1.442 | 1.304 | 0.0820 | 0.0830 | 0.0730 | 0.0792 |
+
+Track type remains the largest single gain on the 70-race averages (winner log loss 1.370 to
+1.251), and still unevenly: it cuts 2024 from 2.18 to 1.83 but makes 2023 worse.
+
+The weather rows need a careful reading. With the pre-race rate, `weather` improves on `base`
+by 0.10 of winner log loss, yet with the observed rainfall, which is strictly more information,
+it improves by only 0.025. A layer that gains more from a vague 10 to 20% chance at every race
+than from knowing exactly which races were wet is not extracting weather signal; the gain comes
+from mixing a slice of wider-noise wet runs into every race, which softens the win
+probabilities and is rewarded on seasons with surprise winners like 2024. Treat the weather
+layer as a regulariser, not a forecast.
+
+The driver profile still does not help. The tuner kept `aggression_scale = 5` and
+`risk_dnf_scale = 0.25` above zero, but on the held-out seasons the `profile` row is 0.008
+worse than `full` on winner log loss over 70 races and 0.0003 worse on podium Brier. The
+profile stays on by default because that is what the tuner chose on the training seasons; the
+honest summary is that the grid, the overall ratings and the track-type ratings already carry
+the signal, and a 20-race window of places gained and accidents is too noisy to add to it.
 
 ![Calibration](docs/results/backtest-calibration.png)
 
@@ -222,6 +256,7 @@ uv run f1pred season --season 2026                 # title odds for the rest of 
 uv run f1pred backtest --seasons 2023-2025         # score vs baselines; saves outputs/calibration.png and CSVs
 uv run f1pred profile                              # aggression, risk and form for the drivers on the current grid
 uv run f1pred backtest --ablate                    # also score with and without weather, track type and the driver profile; saves outputs/ablation.csv
+uv run f1pred backtest --ablate --observed-rain    # same, but the weather variants see the race-day rainfall (an upper bound)
 uv run f1pred tune                                 # coordinate descent on 2015-2022, held-out report, writes f1pred/tuned.json
 ```
 
@@ -257,6 +292,30 @@ constructor and engine Elo with Monte Carlo perturbation, the closest relative o
 van Kesteren and Bergkamp 2023, JQAS (a Bayesian model showing constructors explain most of the
 variance in results); Kevocado's `F1_Predictor` and neevj2006's `F1_Race_Predictor` (separate
 reliability layer, shared team noise, leakage-safe backtests).
+
+## Changelog
+
+Fixes from the post-Phase-5 code review (Phase 6); every number above was regenerated after
+them.
+
+- Finishers are classified from `positionText`, not `position`. From 2025 the upstream CSV
+  fills `position` with `positionOrder` for retirements (`positionText` is `R`, `W`, `D`, ...),
+  so every 2025 and 2026 retirement had been rated as a finish and the DNF rate collapsed toward
+  zero; it is now 10% for 2025 and 18% for 2026.
+- Administrative statuses (`Disqualified`, `Withdrew`, `Not classified`, `Underweight`, ...)
+  and any status not on the mechanical or accident lists are `other`, not `mechanical`; an
+  unknown status is logged once so new upstream values surface.
+- The DNF circuit factor divides the circuit's rate by the all-time global rate of the same
+  rows instead of the recent-window rate, which had pinned 11 of 35 circuits at the 2.0 clip;
+  the factors now span 0.5 to 1.6 with one at a clip. The evidence count is in races, not rows.
+- `predict`, `backtest`, `season` and `profile` stop with a clear message when the ratings are
+  older than the driver-race table, and the replay fails on a table missing the weather, track
+  or lap-1 columns instead of silently running dry and mixed.
+- The backtest gives each race the circuit's pre-race wet rate by default; `--observed-rain`
+  restores the race-day rainfall as a labelled upper bound.
+- The no-qualifying note names the race the lineup was carried over from, and season odds use
+  the modal driver per seat over the last three completed races so a one-off stand-in is not
+  simulated for the rest of the year.
 
 ## License
 
