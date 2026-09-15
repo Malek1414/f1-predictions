@@ -10,6 +10,7 @@ import pandas as pd
 
 from f1pred.config import ModelParams
 from f1pred.ratings.history import RatingState, state_for_season, state_strengths
+from f1pred.ratings.profile import Profile
 from f1pred.sim.dnf import dnf_probability
 from f1pred.sim.points import points_for_positions, race_points, sprint_points
 from f1pred.sim.race import Entrant, simulate_positions
@@ -109,8 +110,11 @@ def season_entrants(
     season: int,
     race: RemainingRace,
     params: ModelParams,
+    profiles: Mapping[str, Profile] | None = None,
 ) -> list[Entrant]:
+    """The latest race's grid as entrants; `profiles` (spec 6.6) is zero when None or missing."""
     season_state = state_for_season(state, season, params)
+    profiles = {} if profiles is None else profiles
     races = table[~table["is_sprint"]]
     latest_id = races.sort_values("date")["race_id"].iloc[-1]
     latest = races[races["race_id"] == latest_id]
@@ -119,6 +123,7 @@ def season_entrants(
         dry, wet = state_strengths(
             season_state, r.driver_id, r.constructor_id, race.track_type, params
         )
+        profile = profiles.get(r.driver_id, Profile.zero())
         out.append(
             Entrant(
                 driver_id=r.driver_id,
@@ -131,6 +136,9 @@ def season_entrants(
                 low_confidence=season_state.driver_races.get(r.driver_id, 0)
                 < params.min_races_for_confidence,
                 strength_wet=wet,
+                aggression=profile.aggression,
+                risk=profile.risk,
+                form=profile.form,
             )
         )
     return out

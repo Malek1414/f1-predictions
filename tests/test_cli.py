@@ -265,4 +265,4 @@ def test_backtest_ablate(cache_dir, tmp_path):
     )
     assert r.exit_code == 0, r.output
     abl = pd.read_csv(tmp_path / "ablation.csv")
-    assert set(abl.variant) == {"base", "weather", "track", "full"}
+    assert set(abl.variant) == {"base", "weather", "track", "full", "profile"}

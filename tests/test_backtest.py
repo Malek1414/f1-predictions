@@ -71,9 +71,9 @@ def test_backtest_never_reads_future(driver_race, sample_history, monkeypatch):
     seen = []
     original = run_mod.entrants_for_past_race
 
-    def spy(rows, hist, dnf, params):
+    def spy(rows, hist, dnf, params, profiles=None):
         seen.append((set(rows.race_id), set(hist.race_id)))
-        return original(rows, hist, dnf, params)
+        return original(rows, hist, dnf, params, profiles)
 
     monkeypatch.setattr(run_mod, "entrants_for_past_race", spy)
     run_backtest(driver_race, sample_history, [2023], P, n_runs=50, seed=0)
@@ -125,5 +125,32 @@ def test_base_variant_matches_flags_off(driver_race, sample_history):
     abl = ablation_backtest(driver_race, sample_history, [2024], P, n_runs=200, seed=1)
     base = abl[(abl.variant == "base") & (abl.season == "2024")].iloc[0]
     assert base.model_logloss == pytest.approx(direct.seasons.model_logloss.iloc[0])
-    assert set(abl.variant) == {"base", "weather", "track", "full"}
-    assert (abl.season == "all").sum() == 4
+    # Phase 5 adds the `profile` variant.
+    assert set(abl.variant) == {"base", "weather", "track", "full", "profile"}
+    assert (abl.season == "all").sum() == 5
+
+
+def test_entrants_carry_profiles(driver_race, sample_history):
+    from f1pred.ratings.profile import profile_features, profile_lookup
+
+    race_id = int(
+        driver_race[(driver_race.season == 2024) & (~driver_race.is_sprint)].race_id.iloc[-1]
+    )
+    rows = driver_race[(driver_race.race_id == race_id) & (~driver_race.is_sprint)]
+    hist = sample_history[(sample_history.race_id == race_id) & (~sample_history.is_sprint)]
+    lookup = profile_lookup(profile_features(driver_race, sample_history, P))
+    ents = entrants_for_past_race(
+        rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, P, lookup
+    )
+    e = next(x for x in ents if x.driver_id == "max_verstappen")
+    p = lookup[(race_id, "max_verstappen")]
+    assert (e.aggression, e.risk, e.form) == (p.aggression, p.risk, p.form)
+    plain = entrants_for_past_race(rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, P)
+    assert all(x.aggression == 0 and x.risk == 0 and x.form == 0 for x in plain)
+
+
+def test_ablation_has_profile_variant(driver_race, sample_history):
+    from f1pred.backtest.run import ablation_backtest
+
+    abl = ablation_backtest(driver_race, sample_history, [2024], P, n_runs=100, seed=1)
+    assert set(abl.variant) == {"base", "weather", "track", "full", "profile"}

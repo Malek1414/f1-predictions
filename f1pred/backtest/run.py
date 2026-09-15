@@ -17,6 +17,7 @@ from f1pred.backtest.scoring import (
 )
 from f1pred.config import ModelParams
 from f1pred.ratings.conditional import strengths
+from f1pred.ratings.profile import Profile, profile_features, profile_lookup
 from f1pred.sim.dnf import dnf_cache_for_races
 from f1pred.sim.race import Entrant, simulate_race
 
@@ -51,12 +52,16 @@ def entrants_for_past_race(
     history_rows: pd.DataFrame,
     dnf_lookup: Mapping[tuple[int, str], float],
     params: ModelParams,
+    profiles: Mapping[tuple[int, str], Profile] | None = None,
 ) -> list[Entrant]:
+    """Entrants from pre-race rows; a missing profile (spec 6.6) is zero."""
     hist = history_rows.set_index("driver_id")
     conditional = "driver_wet_pre" in hist.columns
+    profiles = {} if profiles is None else profiles
     out = []
     for r in race_rows.itertuples(index=False):
         h = hist.loc[r.driver_id]
+        profile = profiles.get((int(r.race_id), r.driver_id), Profile.zero())
         if conditional:
             dry, wet = strengths(
                 float(h.driver_rating_pre),
@@ -82,6 +87,9 @@ def entrants_for_past_race(
                 p_dnf=float(dnf_lookup[(int(r.race_id), r.driver_id)]),
                 low_confidence=bool(h.driver_races_pre < params.min_races_for_confidence),
                 strength_wet=wet,
+                aggression=profile.aggression,
+                risk=profile.risk,
+                form=profile.form,
             )
         )
     return out
@@ -113,19 +121,22 @@ def run_backtest(
     n_runs: int = 10_000,
     seed: int = 0,
     dnf_cache: dict[tuple[int, str], float] | None = None,
+    profiles: Mapping[tuple[int, str], Profile] | None = None,
 ) -> BacktestResult:
     seasons = list(seasons)
     races = table[(~table["is_sprint"]) & (table["season"].isin(seasons))]
     race_ids = races.sort_values("date")["race_id"].unique()
     if dnf_cache is None:
         dnf_cache = dnf_cache_for_races(table, race_ids, params)
+    if profiles is None and params.use_profile:
+        profiles = profile_lookup(profile_features(table, history, params))
     race_history = history[~history["is_sprint"]]
 
     rows, all_p, all_won = [], [], []
     for i, race_id in enumerate(race_ids):
         race_rows = races[races["race_id"] == race_id]
         hist_rows = race_history[race_history["race_id"] == race_id]
-        entrants = entrants_for_past_race(race_rows, hist_rows, dnf_cache, params)
+        entrants = entrants_for_past_race(race_rows, hist_rows, dnf_cache, params, profiles)
         is_wet = bool(race_rows["is_wet"].iloc[0]) if "is_wet" in race_rows.columns else False
         forecast = simulate_race(
             entrants,
@@ -181,10 +192,11 @@ def run_backtest(
 
 
 VARIANTS = {
-    "base": {"use_weather": False, "use_track": False},
-    "weather": {"use_weather": True, "use_track": False},
-    "track": {"use_weather": False, "use_track": True},
-    "full": {"use_weather": True, "use_track": True},
+    "base": {"use_weather": False, "use_track": False, "use_profile": False},
+    "weather": {"use_weather": True, "use_track": False, "use_profile": False},
+    "track": {"use_weather": False, "use_track": True, "use_profile": False},
+    "full": {"use_weather": True, "use_track": True, "use_profile": False},
+    "profile": {"use_weather": True, "use_track": True, "use_profile": True},
 }
 ABLATION_COLUMNS = [
     "variant",
@@ -205,7 +217,9 @@ def ablation_backtest(
     seed: int = 0,
     dnf_cache: dict[tuple[int, str], float] | None = None,
 ) -> pd.DataFrame:
-    """Spec 8.1: scores with and without weather and track type, per season plus an `all` row."""
+    """Spec 8.1: scores with and without weather, track type and the driver profile, per season
+    plus an `all` row. `full` is weather and track with the profile off; `profile` is everything.
+    """
     seasons = list(seasons)
     race_ids = table[(~table["is_sprint"]) & (table["season"].isin(seasons))]["race_id"].unique()
     if dnf_cache is None:

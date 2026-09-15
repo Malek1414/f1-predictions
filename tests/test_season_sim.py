@@ -156,3 +156,15 @@ def test_season_entrants_carry_wet_strength(driver_race):
     ents = season_entrants(driver_race, state, 2025, race, P)
     assert all(e.strength_wet is not None for e in ents)
     assert any(e.strength_wet != e.strength for e in ents)
+
+
+def test_season_entrants_take_profiles(driver_race):
+    from f1pred.ratings.profile import Profile
+
+    _, state = replay(driver_race, P)
+    race = RemainingRace(999, 1, "Next", "bahrain", pd.Timestamp("2025-03-16"), False)
+    ents = season_entrants(
+        driver_race, state, 2025, race, P, {"max_verstappen": Profile(1.0, 0.5, 0.2, 9)}
+    )
+    e = next(x for x in ents if x.driver_id == "max_verstappen")
+    assert (e.aggression, e.risk, e.form) == (1.0, 0.5, 0.2)

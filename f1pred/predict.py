@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass
 
 import pandas as pd
@@ -12,6 +13,12 @@ from f1pred.config import ModelParams
 from f1pred.data.track_types import load_track_types, track_type_for
 from f1pred.data.weather import circuit_wet_rate, fetch_rain_probability
 from f1pred.ratings.history import RatingState, state_for_season, state_strengths
+from f1pred.ratings.profile import (
+    Profile,
+    latest_profiles,
+    profile_features,
+    profile_lookup,
+)
 from f1pred.sim.dnf import dnf_probability
 from f1pred.sim.race import Entrant
 
@@ -106,9 +113,15 @@ def _names_from_table(table: pd.DataFrame) -> dict[str, str]:
 
 
 def _future_entrants(
-    raw: dict, table: pd.DataFrame, state: RatingState, ref: RaceRef, params: ModelParams
+    raw: dict,
+    table: pd.DataFrame,
+    state: RatingState,
+    ref: RaceRef,
+    params: ModelParams,
+    profiles: Mapping[str, Profile] | None = None,
 ) -> tuple[list[Entrant], dict[str, str], bool, str | None]:
     season_state = state_for_season(state, ref.season, params)
+    profiles = {} if profiles is None else profiles
     quali = raw["qualifying"][raw["qualifying"]["raceId"] == ref.race_id]
     if not quali.empty:
         q = quali.merge(
@@ -128,6 +141,7 @@ def _future_entrants(
     entrants, names = [], {}
     for driver_id, constructor_id, grid, name in rows:
         dry, wet = state_strengths(season_state, driver_id, constructor_id, ref.track_type, params)
+        profile = profiles.get(driver_id, Profile.zero())
         entrants.append(
             Entrant(
                 driver_id=driver_id,
@@ -140,6 +154,9 @@ def _future_entrants(
                 low_confidence=season_state.driver_races.get(driver_id, 0)
                 < params.min_races_for_confidence,
                 strength_wet=wet,
+                aggression=profile.aggression,
+                risk=profile.risk,
+                form=profile.form,
             )
         )
         names[driver_id] = name
@@ -193,9 +210,13 @@ def build_prediction_inputs(
             )
             for r in rows.itertuples(index=False)
         }
-        entrants = entrants_for_past_race(rows, hist, dnf, params)
+        past_profiles = (
+            profile_lookup(profile_features(table, history, params)) if params.use_profile else None
+        )
+        entrants = entrants_for_past_race(rows, hist, dnf, params, past_profiles)
         return PredictionInputs(
             race, entrants, _names_from_table(rows), use_grid, None, rain, source
         )
-    entrants, names, grid_ok, note = _future_entrants(raw, table, state, race, params)
+    profiles = latest_profiles(table, history, params) if params.use_profile else None
+    entrants, names, grid_ok, note = _future_entrants(raw, table, state, race, params, profiles)
     return PredictionInputs(race, entrants, names, use_grid and grid_ok, note, rain, source)

@@ -137,3 +137,15 @@ def test_future_race_uses_forecast_then_fallback(raw_sample, driver_race, replay
         raw_sample, table, history, state, ref, P.replace(use_weather=False)
     )
     assert inputs.rain_probability == 0.0 and inputs.rain_source == "disabled"
+
+
+def test_prediction_inputs_include_profiles(raw_sample, driver_race, replayed):
+    history, state = replayed
+    ref = resolve_race(raw_sample, driver_race, 2024, round=8)
+    inputs = build_prediction_inputs(raw_sample, driver_race, history, state, ref, P)
+    assert any(e.aggression != 0 or e.risk != 0 or e.form != 0 for e in inputs.entrants)
+    last_id = int(driver_race[driver_race.season == 2024].race_id.max())
+    table = driver_race[driver_race.race_id != last_id]
+    ref = resolve_race(raw_sample, table, 2024, round=24)
+    inputs = build_prediction_inputs(raw_sample, table, history, state, ref, P)
+    assert any(e.aggression != 0 for e in inputs.entrants)
