@@ -5,6 +5,7 @@ import pytest
 
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import TABLES, load_raw_from_dir
+from f1pred.data.laps import load_lap1_csv
 from f1pred.data.track_types import load_track_types
 from f1pred.data.weather import load_weather_csv
 
@@ -32,17 +33,27 @@ def weather_sample() -> pd.DataFrame:
 
 
 @pytest.fixture(scope="session")
-def driver_race(raw_sample, weather_sample) -> pd.DataFrame:
+def lap1_sample() -> pd.DataFrame:
+    return load_lap1_csv(SAMPLE_DIR / "lap1.csv")
+
+
+@pytest.fixture(scope="session")
+def driver_race(raw_sample, weather_sample, lap1_sample) -> pd.DataFrame:
     return build_driver_race_table(
-        raw_sample, start_season=2010, weather=weather_sample, track_types=load_track_types()
+        raw_sample,
+        start_season=2010,
+        weather=weather_sample,
+        track_types=load_track_types(),
+        lap1=lap1_sample,
     )
 
 
 @pytest.fixture(scope="session")
-def cache_dir(tmp_path_factory, raw_sample, driver_race) -> Path:
+def cache_dir(tmp_path_factory, raw_sample, driver_race, lap1_sample) -> Path:
     """A cache directory pre-populated from the sample, as `f1pred data update` would leave it."""
     d = tmp_path_factory.mktemp("cache")
     for t in TABLES:
         raw_sample[t].to_parquet(d / f"{t}.parquet", index=False)
     driver_race.to_parquet(d / "driver_race.parquet", index=False)
+    lap1_sample.to_parquet(d / "lap1.parquet", index=False)
     return d

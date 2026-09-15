@@ -29,9 +29,10 @@ DRIVER_RACE_COLUMNS = (
     "is_sprint",
     "is_wet",
     "track_type",
+    "lap1_position",
 )
 # Columns produced per session; is_wet and track_type are added once for the whole table.
-_SESSION_COLUMNS = DRIVER_RACE_COLUMNS[:-2]
+_SESSION_COLUMNS = tuple(c for c in DRIVER_RACE_COLUMNS if c not in ("is_wet", "track_type"))
 
 ACCIDENT_STATUSES = {"Accident", "Collision", "Spun off", "Collision damage", "Damage"}
 OTHER_STATUSES = {
@@ -74,6 +75,7 @@ def _session_rows(
     lookups: dict[str, pd.DataFrame],
     date_col: str,
     is_sprint: bool,
+    lap1: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     df = results.merge(races, on="raceId", how="inner")
     df = df.merge(lookups["drivers"], on="driverId", how="left")
@@ -91,6 +93,15 @@ def _session_rows(
     dnf_kind = [
         classify_dnf(s, c) for s, c in zip(df["status"].fillna(""), classified, strict=True)
     ]
+    if lap1 is not None and not is_sprint:
+        # Lap-1 positions only exist for grands prix; one row per (race, driver).
+        l1 = lap1[["raceId", "driverId", "lap1_position"]].drop_duplicates(["raceId", "driverId"])
+        joined = df[["raceId", "driverId"]].merge(l1, on=["raceId", "driverId"], how="left")
+        lap1_position = pd.array(
+            pd.to_numeric(joined["lap1_position"], errors="coerce").to_numpy(), dtype="Int64"
+        )
+    else:
+        lap1_position = pd.array([pd.NA] * len(df), dtype="Int64")
 
     out = pd.DataFrame(
         {
@@ -111,6 +122,7 @@ def _session_rows(
             "dnf_kind": pd.Series(dnf_kind, index=df.index, dtype=object),
             "points": df["points"].fillna(0).astype(float),
             "is_sprint": is_sprint,
+            "lap1_position": lap1_position,
         }
     )
     out["dnf"] = out["dnf_kind"].isin(["accident", "mechanical"])
@@ -122,10 +134,12 @@ def build_driver_race_table(
     start_season: int = 2010,
     weather: pd.DataFrame | None = None,
     track_types: Mapping[str, str] | None = None,
+    lap1: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Spec 3.5. `weather` is the race_id -> is_wet table; sprint rows share their race's is_wet.
 
-    With `weather=None` every row is dry; with `track_types=None` every row is `mixed`.
+    With `weather=None` every row is dry; with `track_types=None` every row is `mixed`;
+    with `lap1=None` (the `raceId, driverId, lap1_position` table) `lap1_position` is all NA.
     """
     races = raw["races"].rename(columns={"name": "name_race"})
     races = races[races["year"] >= start_season][
@@ -139,7 +153,7 @@ def build_driver_race_table(
         "circuits": raw["circuits"][["circuitId", "circuitRef"]],
         "status": raw["status"][["statusId", "status"]],
     }
-    race_rows = _session_rows(raw["results"], races, lookups, "date", is_sprint=False)
+    race_rows = _session_rows(raw["results"], races, lookups, "date", is_sprint=False, lap1=lap1)
     sprint_rows = _session_rows(
         raw["sprint_results"], races, lookups, "sprint_date", is_sprint=True
     )

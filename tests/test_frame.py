@@ -98,3 +98,17 @@ def test_wet_and_track_columns(driver_race, raw_sample):
     assert driver_race[driver_race.circuit_id == "monaco"].track_type.eq("street").all()
     plain = build_driver_race_table(raw_sample)
     assert not plain.is_wet.any() and plain.track_type.eq("mixed").all()
+
+
+def test_lap1_position_column(driver_race, raw_sample):
+    from f1pred.data.frame import build_driver_race_table
+
+    assert driver_race.lap1_position.dtype == "Int64"
+    races = driver_race[~driver_race.is_sprint]
+    assert races.lap1_position.notna().mean() > 0.95
+    assert driver_race[driver_race.is_sprint].lap1_position.isna().all()
+    row = races[
+        (races.season == 2024) & (races.circuit_id == "monaco") & (races.driver_id == "leclerc")
+    ].iloc[0]
+    assert row.lap1_position == 1
+    assert build_driver_race_table(raw_sample).lap1_position.isna().all()
