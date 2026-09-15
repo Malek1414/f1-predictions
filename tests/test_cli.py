@@ -1,6 +1,7 @@
 from pathlib import Path
 
 import pandas as pd
+import pytest
 from typer.testing import CliRunner
 
 from f1pred.cli import app
@@ -139,3 +140,65 @@ def test_tune_smoke(cache_dir, tmp_path, monkeypatch):
     )
     assert r.exit_code == 0, r.output
     assert (tmp_path / "tuned.json").exists()
+
+
+def test_season_command_on_completed_season(cache_dir, tmp_path):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    r = runner.invoke(
+        app,
+        [
+            "season",
+            "--season",
+            "2024",
+            "--runs",
+            "50",
+            "--cache-dir",
+            str(cache_dir),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert "complete" in r.output.lower()
+    assert "Max Verstappen" in r.output and "100.0%" in r.output
+    assert (tmp_path / "2024-title.png").exists()
+    drivers = pd.read_csv(tmp_path / "2024-drivers.csv")
+    assert drivers.iloc[0].driver_id == "max_verstappen"
+
+
+def test_season_command_with_remaining_races(cache_dir, tmp_path, driver_race):
+    # Cache without the last two 2024 races so two rounds remain.
+    partial = tmp_path / "cache"
+    partial.mkdir()
+    for p in cache_dir.glob("*.parquet"):
+        (partial / p.name).write_bytes(p.read_bytes())
+    ids = sorted(driver_race[driver_race.season == 2024].race_id.unique())[-2:]
+    driver_race[~driver_race.race_id.isin(ids)].to_parquet(
+        partial / "driver_race.parquet", index=False
+    )
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(partial)])
+    r = runner.invoke(
+        app,
+        [
+            "season",
+            "--season",
+            "2024",
+            "--runs",
+            "100",
+            "--cache-dir",
+            str(partial),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert "2 races left" in r.output
+    cons = pd.read_csv(tmp_path / "2024-constructors.csv")
+    assert set(cons.constructor_id) >= {"mclaren", "ferrari", "red_bull"}
+    assert cons.p_title.sum() == pytest.approx(1.0)
+
+
+def test_season_unknown_season_exits_2(cache_dir):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    r = runner.invoke(app, ["season", "--season", "1980", "--cache-dir", str(cache_dir)])
+    assert r.exit_code == 2

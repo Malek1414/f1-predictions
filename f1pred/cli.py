@@ -23,9 +23,15 @@ from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import DataUnavailableError, load_cached_tables, load_tables
 from f1pred.predict import UnknownRaceError, build_prediction_inputs, resolve_race
 from f1pred.ratings.history import RatingState, replay
-from f1pred.report.charts import calibration_chart, position_heatmap, win_chart
-from f1pred.report.tables import backtest_table, forecast_table, ratings_table
+from f1pred.report.charts import calibration_chart, position_heatmap, title_chart, win_chart
+from f1pred.report.tables import backtest_table, forecast_table, ratings_table, title_tables
 from f1pred.sim.race import simulate_race
+from f1pred.sim.season import (
+    current_standings,
+    remaining_calendar,
+    season_entrants,
+    simulate_season,
+)
 
 DRIVER_RACE_FILE = "driver_race.parquet"
 HISTORY_FILE = "ratings_history.parquet"
@@ -166,6 +172,52 @@ def backtest(
     console.print(
         f"Calibration chart: {calibration_chart(result.calibration, out / 'calibration.png')}"
     )
+
+
+@app.command()
+def season(
+    season: int = typer.Option(..., "--season"),
+    runs: int = typer.Option(2000, "--runs"),
+    seed: int = typer.Option(0, "--seed"),
+    cache_dir: Path = CacheDir,
+    out: Path = OutDir,
+) -> None:
+    """Drivers' and constructors' title odds for the rest of a season."""
+    params = load_params()
+    raw, table = _load_cached(cache_dir)
+    _, state = _load_ratings(cache_dir)
+    seasons_available = sorted(raw["races"]["year"].unique().tolist())
+    if season not in seasons_available:
+        console.print(
+            f"[red]No calendar for {season}.[/red] Seasons available: "
+            f"{seasons_available[0]}-{seasons_available[-1]}"
+        )
+        raise typer.Exit(2)
+    remaining = remaining_calendar(raw, table, season)
+    if not remaining:
+        console.print(f"[yellow]Season {season} is complete; showing final standings.[/yellow]")
+    entrants_by_race = [season_entrants(table, state, season, r, params) for r in remaining]
+    driver_points, constructor_points, mapping = current_standings(table, season)
+    forecast = simulate_season(
+        season,
+        remaining,
+        entrants_by_race,
+        driver_points,
+        constructor_points,
+        mapping,
+        params,
+        n_runs=runs,
+        seed=seed,
+    )
+    names = dict(zip(table.driver_id, table.driver_name, strict=True))
+    drivers, cons = title_tables(forecast, names)
+    console.print(drivers)
+    console.print(cons)
+    out.mkdir(parents=True, exist_ok=True)
+    forecast.drivers_frame().to_csv(out / f"{season}-drivers.csv", index=False)
+    forecast.constructors_frame().to_csv(out / f"{season}-constructors.csv", index=False)
+    chart = title_chart(forecast, names, f"{season} championship odds", out / f"{season}-title.png")
+    console.print(f"Chart: {chart}")
 
 
 @app.command()
