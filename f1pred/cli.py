@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import dataclasses
 import logging
 from datetime import date
 from pathlib import Path
@@ -9,9 +10,10 @@ from pathlib import Path
 import pandas as pd
 import typer
 from rich.console import Console
+from rich.table import Table
 
 from f1pred import tune as tune_mod
-from f1pred.backtest.run import run_backtest
+from f1pred.backtest.run import ablation_backtest, run_backtest
 from f1pred.config import (
     DEFAULT_CACHE_DIR,
     DEFAULT_OUTPUT_DIR,
@@ -21,6 +23,8 @@ from f1pred.config import (
 )
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import DataUnavailableError, load_cached_tables, load_tables
+from f1pred.data.track_types import load_track_types, track_type_for
+from f1pred.data.weather import build_weather_table, circuit_wet_rate
 from f1pred.predict import UnknownRaceError, build_prediction_inputs, resolve_race
 from f1pred.ratings.history import RatingState, replay
 from f1pred.report.charts import calibration_chart, position_heatmap, title_chart, win_chart
@@ -91,14 +95,23 @@ def data_update(cache_dir: Path = CacheDir) -> None:
         raw = load_tables(cache_dir, refresh=True)
     except DataUnavailableError as exc:
         _fail(str(exc), 1)
-    table = build_driver_race_table(raw, start_season=params.start_season)
+    try:
+        weather = build_weather_table(raw, cache_dir, params)
+    except Exception as exc:  # spec 10: Open-Meteo down entirely; keep going without rain
+        console.print(f"[yellow]Weather unavailable ({exc}); all races treated as dry.[/yellow]")
+        weather = None
+    table = build_driver_race_table(
+        raw, start_season=params.start_season, weather=weather, track_types=load_track_types()
+    )
     table.to_parquet(cache_dir / DRIVER_RACE_FILE, index=False)
     races = table[~table.is_sprint]
+    n_wet = int(races.groupby("race_id").is_wet.first().sum())
     console.print(
         f"{len(table):,} driver-race rows, {races.race_id.nunique()} races, "
         f"{races.season.min()}-{races.season.max()}, latest: {races.race_name.iloc[-1]} "
         f"{races.date.iloc[-1].date()}"
     )
+    console.print(f"{n_wet} wet races (>= {params.wet_threshold_mm} mm in the race window)")
 
 
 @ratings_app.command("build")
@@ -123,6 +136,9 @@ def predict(
     runs: int = typer.Option(10_000, "--runs"),
     seed: int = typer.Option(0, "--seed"),
     no_grid: bool = typer.Option(False, "--no-grid"),
+    rain: float | None = typer.Option(
+        None, "--rain", min=0.0, max=1.0, help="Override the rain probability (0 to 1)"
+    ),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
 ) -> None:
@@ -137,11 +153,19 @@ def predict(
         for c in exc.choices:
             console.print("  " + c)
         raise typer.Exit(2) from None
-    inputs = build_prediction_inputs(raw, table, history, state, ref, params, use_grid=not no_grid)
+    inputs = build_prediction_inputs(
+        raw, table, history, state, ref, params, use_grid=not no_grid, rain_probability=rain
+    )
     if inputs.note:
         console.print(f"[yellow]{inputs.note}[/yellow]")
+    console.print(_rain_line(inputs.rain_probability, inputs.rain_source))
     forecast = simulate_race(
-        inputs.entrants, params, n_runs=runs, seed=seed, use_grid=inputs.use_grid
+        inputs.entrants,
+        params,
+        n_runs=runs,
+        seed=seed,
+        use_grid=inputs.use_grid,
+        rain_probability=inputs.rain_probability,
     )
     low = {e.driver_id for e in inputs.entrants if e.low_confidence}
     title = f"{ref.name} {ref.season} (round {ref.round})"
@@ -157,6 +181,9 @@ def backtest(
     seasons: str = typer.Option("2023-2025", "--seasons", help="e.g. 2023-2025 or 2022,2024"),
     runs: int = typer.Option(10_000, "--runs"),
     seed: int = typer.Option(0, "--seed"),
+    ablate: bool = typer.Option(
+        False, "--ablate", help="Also score with and without weather and track type"
+    ),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
 ) -> None:
@@ -164,7 +191,8 @@ def backtest(
     params = load_params()
     _, table = _load_cached(cache_dir)
     history, _ = _load_ratings(cache_dir)
-    result = run_backtest(table, history, _parse_seasons(seasons), params, n_runs=runs, seed=seed)
+    season_list = _parse_seasons(seasons)
+    result = run_backtest(table, history, season_list, params, n_runs=runs, seed=seed)
     console.print(backtest_table(result.seasons))
     out.mkdir(parents=True, exist_ok=True)
     result.races.to_csv(out / "backtest_races.csv", index=False)
@@ -172,6 +200,38 @@ def backtest(
     console.print(
         f"Calibration chart: {calibration_chart(result.calibration, out / 'calibration.png')}"
     )
+    if ablate:
+        abl = ablation_backtest(table, history, season_list, params, n_runs=runs, seed=seed)
+        console.print(_ablation_table(abl))
+        abl.to_csv(out / "ablation.csv", index=False)
+        console.print(f"Ablation table: {out / 'ablation.csv'}")
+
+
+def _rain_line(probability: float, source: str) -> str:
+    label = {
+        "forecast": "forecast",
+        "historical": "historical rate; forecast unavailable",
+        "observed": "observed",
+        "override": "override",
+        "disabled": "weather disabled",
+    }.get(source, source)
+    return f"Rain chance: {round(100 * probability):.0f}% ({label})"
+
+
+def _ablation_table(abl: pd.DataFrame) -> Table:
+    t = Table(title="Ablation: with and without weather and track type")
+    for col in ["variant", "season", "races", "log loss", "Brier", "Spearman"]:
+        t.add_column(col, justify="right" if col not in ("variant", "season") else "left")
+    for r in abl.itertuples(index=False):
+        t.add_row(
+            r.variant,
+            r.season,
+            str(r.n_races),
+            f"{r.model_logloss:.4f}",
+            f"{r.model_brier:.4f}",
+            f"{r.model_spearman:.3f}",
+        )
+    return t
 
 
 @app.command()
@@ -193,7 +253,17 @@ def season(
             f"{seasons_available[0]}-{seasons_available[-1]}"
         )
         raise typer.Exit(2)
-    remaining = remaining_calendar(raw, table, season)
+    track_types = load_track_types()
+    remaining = [
+        dataclasses.replace(
+            r,
+            track_type=track_type_for(r.circuit_id, track_types),
+            rain_probability=circuit_wet_rate(table, r.circuit_id, r.date)
+            if params.use_weather
+            else 0.0,
+        )
+        for r in remaining_calendar(raw, table, season)
+    ]
     if not remaining:
         console.print(f"[yellow]Season {season} is complete; showing final standings.[/yellow]")
     entrants_by_race = [season_entrants(table, state, season, r, params) for r in remaining]
@@ -208,6 +278,7 @@ def season(
         params,
         n_runs=runs,
         seed=seed,
+        rain_by_race=[r.rain_probability for r in remaining],
     )
     names = dict(zip(table.driver_id, table.driver_name, strict=True))
     drivers, cons = title_tables(forecast, names)

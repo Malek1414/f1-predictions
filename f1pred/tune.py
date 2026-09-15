@@ -21,6 +21,11 @@ SEARCH_SPACE: dict[str, list[float]] = {
     "sigma_driver": [60.0, 80.0, 110.0],
     "grid_bonus": [4.0, 8.0, 12.0],
     "regress_constructor": [0.3, 0.4, 0.6],
+    # Phase 4 (spec 8.1)
+    "shrink_wet": [4.0, 8.0, 16.0],
+    "shrink_track": [4.0, 8.0, 16.0],
+    "wet_noise_factor": [1.0, 1.5, 2.0],
+    "wet_dnf_factor": [1.0, 1.5, 2.0],
 }
 
 

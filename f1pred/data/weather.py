@@ -98,7 +98,8 @@ def build_weather_table(
 ) -> pd.DataFrame:
     """Race-day rain for every completed race since start_season, cached in weather.parquet."""
     cache_dir = Path(cache_dir)
-    today = pd.Timestamp.utcnow().normalize().tz_localize(None) if today is None else today
+    # Timestamp.now("UTC") replaces the deprecated Timestamp.utcnow(); same instant.
+    today = pd.Timestamp.now("UTC").normalize().tz_localize(None) if today is None else today
     races = raw["races"].merge(raw["circuits"][["circuitId", "lat", "lng"]], on="circuitId")
     races = races[(races["year"] >= params.start_season) & (pd.to_datetime(races["date"]) < today)]
     path = cache_dir / WEATHER_FILE

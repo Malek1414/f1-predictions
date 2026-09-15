@@ -202,3 +202,67 @@ def test_season_unknown_season_exits_2(cache_dir):
     runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
     r = runner.invoke(app, ["season", "--season", "1980", "--cache-dir", str(cache_dir)])
     assert r.exit_code == 2
+
+
+def test_data_update_builds_weather(tmp_path, monkeypatch):
+    from f1pred.data import weather as weather_mod
+
+    monkeypatch.setattr(
+        hub,
+        "hf_hub_download",
+        lambda repo_id, filename, repo_type: str(SAMPLE_DIR / Path(filename).name),
+    )
+    monkeypatch.setattr(weather_mod, "fetch_race_rain_mm", lambda *a: 0.0)
+    r = runner.invoke(app, ["data", "update", "--cache-dir", str(tmp_path)])
+    assert r.exit_code == 0, r.output
+    assert (tmp_path / "weather.parquet").exists()
+    assert "wet" in r.output.lower()
+    table = pd.read_parquet(tmp_path / "driver_race.parquet")
+    assert "is_wet" in table.columns and "track_type" in table.columns
+
+
+def test_predict_rain_override_and_print(cache_dir, tmp_path):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    # The fixture names this race "São Paulo Grand Prix"; match on its circuitRef instead.
+    r = runner.invoke(
+        app,
+        [
+            "predict",
+            "--season",
+            "2024",
+            "--race",
+            "interlagos",
+            "--runs",
+            "200",
+            "--rain",
+            "0.7",
+            "--cache-dir",
+            str(cache_dir),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert "Rain chance: 70%" in r.output
+
+
+def test_backtest_ablate(cache_dir, tmp_path):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    r = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--seasons",
+            "2024",
+            "--runs",
+            "100",
+            "--ablate",
+            "--cache-dir",
+            str(cache_dir),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    abl = pd.read_csv(tmp_path / "ablation.csv")
+    assert set(abl.variant) == {"base", "weather", "track", "full"}
