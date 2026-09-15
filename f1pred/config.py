@@ -47,6 +47,15 @@ class ModelParams:
     shrink_track: float = 8.0
     wet_noise_factor: float = 1.5
     wet_dnf_factor: float = 1.5
+    # Driver profile (Phase 5)
+    use_profile: bool = True
+    profile_window: int = 20
+    form_window: int = 6
+    shrink_profile: float = 10.0
+    aggression_scale: float = 0.0
+    risk_noise_scale: float = 0.0
+    risk_dnf_scale: float = 0.0
+    form_scale: float = 0.0
 
     def replace(self, **changes: object) -> ModelParams:
         return dataclasses.replace(self, **changes)

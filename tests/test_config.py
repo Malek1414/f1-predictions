@@ -43,3 +43,15 @@ def test_phase4_defaults():
     assert p.wet_threshold_mm == 0.5 and p.race_window_hours == 3
     assert p.shrink_wet == 8.0 and p.shrink_track == 8.0
     assert p.wet_noise_factor == 1.5 and p.wet_dnf_factor == 1.5
+
+
+def test_phase5_defaults():
+    p = DEFAULT_PARAMS
+    assert p.use_profile and p.profile_window == 20 and p.form_window == 6
+    assert p.shrink_profile == 10.0
+    assert (p.aggression_scale, p.risk_noise_scale, p.risk_dnf_scale, p.form_scale) == (
+        0,
+        0,
+        0,
+        0,
+    )
