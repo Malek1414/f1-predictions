@@ -2,11 +2,14 @@
 
 from __future__ import annotations
 
+import logging
 from collections.abc import Mapping
 
 import pandas as pd
 
 from f1pred.data.track_types import DEFAULT_TRACK_TYPE, track_type_for
+
+log = logging.getLogger(__name__)
 
 DRIVER_RACE_COLUMNS = (
     "season",
@@ -35,15 +38,91 @@ DRIVER_RACE_COLUMNS = (
 _SESSION_COLUMNS = tuple(c for c in DRIVER_RACE_COLUMNS if c not in ("is_wet", "track_type"))
 
 ACCIDENT_STATUSES = {"Accident", "Collision", "Spun off", "Collision damage", "Damage"}
+MECHANICAL_STATUSES = {
+    "Engine",
+    "Gearbox",
+    "Transmission",
+    "Clutch",
+    "Hydraulics",
+    "Electrical",
+    "Radiator",
+    "Suspension",
+    "Brakes",
+    "Differential",
+    "Overheating",
+    "Mechanical",
+    "Tyre",
+    "Puncture",
+    "Driveshaft",
+    "Fuel pressure",
+    "Front wing",
+    "Water pressure",
+    "Refuelling",
+    "Wheel",
+    "Throttle",
+    "Steering",
+    "Technical",
+    "Electronics",
+    "Broken wing",
+    "Heat shield fire",
+    "Exhaust",
+    "Oil leak",
+    "Wheel rim",
+    "Water leak",
+    "Fuel pump",
+    "Track rod",
+    "Oil pressure",
+    "Engine fire",
+    "Engine misfire",
+    "Tyre puncture",
+    "Out of fuel",
+    "Wheel nut",
+    "Pneumatics",
+    "Handling",
+    "Rear wing",
+    "Fire",
+    "Wheel bearing",
+    "Fuel system",
+    "Oil line",
+    "Fuel rig",
+    "Launch control",
+    "Fuel",
+    "Power loss",
+    "Vibrations",
+    "Drivetrain",
+    "Ignition",
+    "Chassis",
+    "Battery",
+    "Stalled",
+    "Halfshaft",
+    "Crankshaft",
+    "Alternator",
+    "Oil pump",
+    "Fuel leak",
+    "Fuel pipe",
+    "Power Unit",
+    "ERS",
+    "Brake duct",
+    "Seat",
+    "Undertray",
+    "Cooling system",
+    "Spark plugs",
+    "Turbo",
+    "CV joint",
+    "Water pump",
+    "Debris",
+}
+# Administrative and non-mechanical reasons for not being classified: never a DNF.
 OTHER_STATUSES = {
     "Disqualified",
     "Retired",
     "Withdrew",
+    "Not classified",
     "Did not qualify",
     "Did not prequalify",
-    "Not classified",
     "Excluded",
     "107% Rule",
+    "Underweight",
     "Injured",
     "Injury",
     "Illness",
@@ -56,17 +135,26 @@ OTHER_STATUSES = {
     "Safety",
     "Finished",
 }
+_warned_statuses: set[str] = set()
 
 
 def classify_dnf(status: str, classified: bool) -> str | None:
-    """Spec 3.5: accident, mechanical, other, or None for a classified finisher."""
+    """Spec 3.5: accident, mechanical, other, or None for a classified finisher.
+
+    Whitelist-based: a status in none of the lists is `other` and is logged once, so that new
+    upstream statuses surface instead of silently counting as mechanical failures.
+    """
     if classified:
         return None
     if status in ACCIDENT_STATUSES:
         return "accident"
-    if status in OTHER_STATUSES or status.startswith("+"):
-        return "other"
-    return "mechanical"
+    if status in MECHANICAL_STATUSES:
+        return "mechanical"
+    if status not in OTHER_STATUSES and not status.startswith("+"):
+        if status not in _warned_statuses:
+            _warned_statuses.add(status)
+            log.warning("unknown status %r for a non-classified row; treated as other", status)
+    return "other"
 
 
 def _session_rows(
@@ -88,7 +176,9 @@ def _session_rows(
     grid = df["grid"].fillna(0).astype(int)
     df["grid_fixed"] = grid.where(grid >= 1, n_entrants)
 
-    position = pd.to_numeric(df["position"], errors="coerce").astype("Int64")
+    # From 2025 the upstream CSV fills `position` with positionOrder for retirements, so the
+    # only reliable finisher marker is a numeric `positionText` (R, W, D, ... otherwise).
+    position = pd.to_numeric(df["positionText"], errors="coerce").astype("Int64")
     classified = position.notna()
     dnf_kind = [
         classify_dnf(s, c) for s, c in zip(df["status"].fillna(""), classified, strict=True)

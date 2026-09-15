@@ -112,3 +112,82 @@ def test_lap1_position_column(driver_race, raw_sample):
     ].iloc[0]
     assert row.lap1_position == 1
     assert build_driver_race_table(raw_sample).lap1_position.isna().all()
+
+
+def _minimal_raw(results_rows):
+    """One race, the given results rows (driverId, constructorId, grid, position, positionText,
+    points, statusId) and the lookup tables `frame.py` reads."""
+    results = pd.DataFrame(
+        results_rows,
+        columns=[
+            "driverId",
+            "constructorId",
+            "grid",
+            "position",
+            "positionText",
+            "points",
+            "statusId",
+        ],
+    )
+    results.insert(0, "raceId", 1)
+    return {
+        "races": pd.DataFrame(
+            [[1, 2025, 1, 10, "Test Grand Prix", "2025-03-16", None]],
+            columns=["raceId", "year", "round", "circuitId", "name", "date", "sprint_date"],
+        ),
+        "results": results,
+        "sprint_results": results.iloc[0:0],
+        "qualifying": pd.DataFrame(columns=["raceId", "driverId", "constructorId", "position"]),
+        "drivers": pd.DataFrame(
+            [[1, "a", "AAA", "A", "Driver"], [2, "b", "BBB", "B", "Driver"]],
+            columns=["driverId", "driverRef", "code", "forename", "surname"],
+        ),
+        "constructors": pd.DataFrame(
+            [[1, "t1", "Team 1"], [2, "t2", "Team 2"]],
+            columns=["constructorId", "constructorRef", "name"],
+        ),
+        "circuits": pd.DataFrame([[10, "testtrack"]], columns=["circuitId", "circuitRef"]),
+        "status": pd.DataFrame([[1, "Finished"], [3, "Accident"]], columns=["statusId", "status"]),
+    }
+
+
+def test_position_comes_from_position_text():
+    from f1pred.data.frame import build_driver_race_table
+
+    # From 2025 the upstream CSV fills `position` with positionOrder for retirements; only
+    # `positionText` tells a finisher (numeric) from a retirement (R, W, D, ...).
+    raw = _minimal_raw(
+        [
+            [1, 1, 1, 15, "R", 0, 3],  # row A: retired, position filled with 15
+            [2, 2, 2, 1, "1", 25, 1],  # row B: won
+        ]
+    )
+    t = build_driver_race_table(raw)
+    a = t[t.driver_id == "a"].iloc[0]
+    assert pd.isna(a.position) and a.dnf and a.dnf_kind == "accident"
+    assert t[t.driver_id == "b"].iloc[0].position == 1
+
+
+@pytest.mark.parametrize(
+    "status,expected",
+    [
+        ("Underweight", "other"),
+        ("Excluded", "other"),
+        ("Power Unit", "mechanical"),
+        ("Some new thing", "other"),
+    ],
+)
+def test_unknown_or_administrative_statuses_are_other(status, expected):
+    assert classify_dnf(status, False) == expected
+
+
+def test_unknown_status_warns_once(caplog):
+    import logging
+
+    from f1pred.data import frame
+
+    frame._warned_statuses.clear()
+    with caplog.at_level(logging.WARNING, logger="f1pred.data.frame"):
+        classify_dnf("Brand new failure", False)
+        classify_dnf("Brand new failure", False)
+    assert sum("Brand new failure" in r.message for r in caplog.records) == 1
