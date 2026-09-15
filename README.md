@@ -47,6 +47,26 @@ No qualifying data yet; running without grid
 
 ![Finishing position heatmap](docs/results/example-positions.png)
 
+### Championship odds
+
+`f1pred season --season 2026`, run with nine races left, chains the race simulation over the
+rest of the calendar 2,000 times and counts who ends up on top:
+
+```text
+           2026 drivers' championship (9 races left, 2,000 runs)
+ #   Driver                  Points now   Exp. points    Title    Top 3
+ 1   Andrea Kimi Antonelli          292           398    89.8%   100.0%
+ 2   George Russell                 211           361    10.1%    99.1%
+ 3   Lando Norris                   186           300     0.1%    58.5%
+ 4   Lewis Hamilton                 191           283     0.0%    24.1%
+ 5   Max Verstappen                 145           268     0.0%    10.2%
+ 6   Charles Leclerc                167           268     0.0%     8.2%
+ 7   Oscar Piastri                  120           202     0.0%     0.0%
+ 8   Liam Lawson                     59            86     0.0%     0.0%
+```
+
+![Championship odds](docs/results/example-title.png)
+
 ## How it works
 
 **Ratings.** Each driver and each constructor starts at 1500. Every pair of classified
@@ -71,6 +91,13 @@ spread folded into the driver noise. See [docs/monte-carlo.md](docs/monte-carlo.
 their recent DNF rate with their constructor's, shrinks it toward the field rate when the
 evidence is thin, and scales it by the circuit's history, clipped to between half and double.
 See [docs/dnf-model.md](docs/dnf-model.md).
+
+**Season simulation.** Championship odds chain the same race simulation over every remaining
+race and sprint, 2,000 times, adding points with that season's rules after each. Ratings are
+held fixed within a simulated season, which under-estimates form swings and upgrades; the
+fastest-lap bonus point (2019 to 2024) is not simulated. Drivers who have left the grid keep
+their points, and constructor totals route each driver's simulated points to their current
+team. See [docs/season-sim.md](docs/season-sim.md).
 
 ## Backtest results
 
@@ -105,6 +132,7 @@ uv sync
 uv run f1pred data update                          # download tables into data/cache/, build the driver-race table
 uv run f1pred ratings build                        # replay 2010 onward, write pre-race ratings, print the top 10
 uv run f1pred predict --season 2026 --round 15     # or --race monza; saves outputs/2026-15-win.png and -positions.png
+uv run f1pred season --season 2026                 # title odds for the rest of the season; saves outputs/2026-title.png and CSVs
 uv run f1pred backtest --seasons 2023-2025         # score vs baselines; saves outputs/calibration.png and CSVs
 uv run f1pred tune                                 # coordinate descent on 2015-2022, held-out report, writes f1pred/tuned.json
 ```
@@ -114,7 +142,9 @@ Simulation commands take `--runs N`, `--seed N` and `--no-grid`; every command t
 
 ## Roadmap
 
-- Phase 3: season simulation with drivers' and constructors' championship odds.
+Done: Phase 3, season simulation with drivers' and constructors' championship odds
+(`f1pred season`).
+
 - Phase 4: wet/dry weather via Open-Meteo and track-type conditional ratings, judged by the backtest.
 - Phase 5: driver profile (aggression, risk, form) from lap-1 positions, DNF kinds and recent over-performance.
 
