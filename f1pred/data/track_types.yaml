@@ -1,0 +1,41 @@
+# Hand-curated circuit types for every circuit raced since 2010. Spec 3.3.
+# street: temporary or semi-permanent street layouts, walls close, low average speed
+# high_speed: long straights, low downforce, power-sensitive
+# high_downforce: flowing medium/high-speed corners, aero-sensitive
+# mixed: everything else
+albert_park: mixed
+americas: mixed
+bahrain: mixed
+baku: street
+buddh: mixed
+catalunya: high_downforce
+hockenheimring: mixed
+hungaroring: high_downforce
+imola: mixed
+interlagos: mixed
+istanbul: mixed
+jeddah: street
+losail: high_downforce
+madring: street
+marina_bay: street
+miami: street
+monaco: street
+monza: high_speed
+mugello: high_speed
+nurburgring: mixed
+portimao: mixed
+red_bull_ring: high_speed
+ricard: mixed
+rodriguez: high_speed
+sepang: high_downforce
+shanghai: mixed
+silverstone: high_speed
+sochi: street
+spa: high_speed
+suzuka: high_downforce
+valencia: street
+vegas: street
+villeneuve: high_speed
+yas_marina: mixed
+yeongam: mixed
+zandvoort: high_downforce
