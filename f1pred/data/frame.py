@@ -2,7 +2,11 @@
 
 from __future__ import annotations
 
+from collections.abc import Mapping
+
 import pandas as pd
+
+from f1pred.data.track_types import DEFAULT_TRACK_TYPE, track_type_for
 
 DRIVER_RACE_COLUMNS = (
     "season",
@@ -23,7 +27,11 @@ DRIVER_RACE_COLUMNS = (
     "dnf_kind",
     "points",
     "is_sprint",
+    "is_wet",
+    "track_type",
 )
+# Columns produced per session; is_wet and track_type are added once for the whole table.
+_SESSION_COLUMNS = DRIVER_RACE_COLUMNS[:-2]
 
 ACCIDENT_STATUSES = {"Accident", "Collision", "Spun off", "Collision damage", "Damage"}
 OTHER_STATUSES = {
@@ -106,10 +114,19 @@ def _session_rows(
         }
     )
     out["dnf"] = out["dnf_kind"].isin(["accident", "mechanical"])
-    return out[list(DRIVER_RACE_COLUMNS)]
+    return out[list(_SESSION_COLUMNS)]
 
 
-def build_driver_race_table(raw: dict[str, pd.DataFrame], start_season: int = 2010) -> pd.DataFrame:
+def build_driver_race_table(
+    raw: dict[str, pd.DataFrame],
+    start_season: int = 2010,
+    weather: pd.DataFrame | None = None,
+    track_types: Mapping[str, str] | None = None,
+) -> pd.DataFrame:
+    """Spec 3.5. `weather` is the race_id -> is_wet table; sprint rows share their race's is_wet.
+
+    With `weather=None` every row is dry; with `track_types=None` every row is `mixed`.
+    """
     races = raw["races"].rename(columns={"name": "name_race"})
     races = races[races["year"] >= start_season][
         ["raceId", "year", "round", "circuitId", "name_race", "date", "sprint_date"]
@@ -127,5 +144,14 @@ def build_driver_race_table(raw: dict[str, pd.DataFrame], start_season: int = 20
         raw["sprint_results"], races, lookups, "sprint_date", is_sprint=True
     )
     table = pd.concat([race_rows, sprint_rows], ignore_index=True)
+    if weather is not None and len(weather):
+        wet = weather.set_index("race_id")["is_wet"].astype(bool)
+        table["is_wet"] = table["race_id"].map(wet).fillna(False).astype(bool)
+    else:
+        table["is_wet"] = False
+    mapping = track_types or {}
+    table["track_type"] = table["circuit_id"].map(
+        lambda c: track_type_for(c, mapping) if mapping else DEFAULT_TRACK_TYPE
+    )
     table = table.sort_values(["date", "race_id", "grid"], kind="stable").reset_index(drop=True)
-    return table
+    return table[list(DRIVER_RACE_COLUMNS)]

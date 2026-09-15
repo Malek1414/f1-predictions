@@ -85,3 +85,16 @@ def test_start_season_filter(raw_sample):
 
     only_2024 = build_driver_race_table(raw_sample, start_season=2024)
     assert set(only_2024.season) == {2024}
+
+
+def test_wet_and_track_columns(driver_race, raw_sample):
+    from f1pred.data.frame import build_driver_race_table
+
+    assert driver_race.is_wet.dtype == bool
+    brazil = driver_race[(driver_race.season == 2024) & (driver_race.circuit_id == "interlagos")]
+    assert brazil.is_wet.all()
+    bahrain = driver_race[(driver_race.season == 2024) & (driver_race.circuit_id == "bahrain")]
+    assert bahrain.is_wet.eq(False).all()
+    assert driver_race[driver_race.circuit_id == "monaco"].track_type.eq("street").all()
+    plain = build_driver_race_table(raw_sample)
+    assert not plain.is_wet.any() and plain.track_type.eq("mixed").all()

@@ -5,6 +5,7 @@ import pytest
 
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import TABLES, load_raw_from_dir
+from f1pred.data.track_types import load_track_types
 from f1pred.data.weather import load_weather_csv
 
 SAMPLE_DIR = Path(__file__).parent / "fixtures" / "sample"
@@ -21,8 +22,10 @@ def weather_sample() -> pd.DataFrame:
 
 
 @pytest.fixture(scope="session")
-def driver_race(raw_sample) -> pd.DataFrame:
-    return build_driver_race_table(raw_sample, start_season=2010)
+def driver_race(raw_sample, weather_sample) -> pd.DataFrame:
+    return build_driver_race_table(
+        raw_sample, start_season=2010, weather=weather_sample, track_types=load_track_types()
+    )
 
 
 @pytest.fixture(scope="session")
