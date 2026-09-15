@@ -218,6 +218,12 @@ def backtest(
         "--ablate",
         help="Also score with and without weather, track type and the driver profile",
     ),
+    observed_rain: bool = typer.Option(
+        False,
+        "--observed-rain",
+        help="Use each race's observed rainfall instead of the pre-race historical wet rate "
+        "(an upper bound on what a forecast could deliver)",
+    ),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
 ) -> None:
@@ -226,7 +232,11 @@ def backtest(
     _, table = _load_cached(cache_dir)
     history, _ = _load_ratings(cache_dir)
     season_list = _parse_seasons(seasons)
-    result = run_backtest(table, history, season_list, params, n_runs=runs, seed=seed)
+    rain_mode = "observed" if observed_rain else "historical"
+    console.print(f"Rain in the backtest: {rain_mode} ({_RAIN_MODE_LABEL[rain_mode]})")
+    result = run_backtest(
+        table, history, season_list, params, n_runs=runs, seed=seed, observed_rain=observed_rain
+    )
     console.print(backtest_table(result.seasons))
     out.mkdir(parents=True, exist_ok=True)
     result.races.to_csv(out / "backtest_races.csv", index=False)
@@ -235,7 +245,15 @@ def backtest(
         f"Calibration chart: {calibration_chart(result.calibration, out / 'calibration.png')}"
     )
     if ablate:
-        abl = ablation_backtest(table, history, season_list, params, n_runs=runs, seed=seed)
+        abl = ablation_backtest(
+            table,
+            history,
+            season_list,
+            params,
+            n_runs=runs,
+            seed=seed,
+            observed_rain=observed_rain,
+        )
         console.print(_ablation_table(abl))
         abl.to_csv(out / "ablation.csv", index=False)
         console.print(f"Ablation table: {out / 'ablation.csv'}")
@@ -252,8 +270,18 @@ def _rain_line(probability: float, source: str) -> str:
     return f"Rain chance: {round(100 * probability):.0f}% ({label})"
 
 
+_RAIN_MODE_LABEL = {
+    "historical": "pre-race circuit wet rate",
+    "observed": "race-day rainfall, an upper bound",
+}
+
+
 def _ablation_table(abl: pd.DataFrame) -> Table:
-    t = Table(title="Ablation: with and without weather, track type and the driver profile")
+    modes = ", ".join(sorted(set(abl.rain_mode)))
+    t = Table(
+        title="Ablation: with and without weather, track type and the driver profile "
+        f"(rain: {modes})"
+    )
     for col in ["variant", "season", "races", "log loss", "Brier", "Spearman"]:
         t.add_column(col, justify="right" if col not in ("variant", "season") else "left")
     for r in abl.itertuples(index=False):

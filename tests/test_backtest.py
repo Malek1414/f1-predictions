@@ -174,3 +174,35 @@ def test_ablation_has_profile_variant(driver_race, sample_history):
 
     abl = ablation_backtest(driver_race, sample_history, [2024], P, n_runs=100, seed=1)
     assert set(abl.variant) == {"base", "weather", "track", "full", "profile"}
+
+
+def test_backtest_default_rain_is_pre_race(driver_race, sample_history, monkeypatch):
+    # Default: the circuit's historical wet rate (known before the race). `observed_rain=True`
+    # is the old upper bound that peeks at the race-day rainfall.
+    import f1pred.backtest.run as run_mod
+
+    seen = []
+    orig = run_mod.simulate_race
+
+    def spy(*a, **k):
+        seen.append(k.get("rain_probability"))
+        return orig(*a, **k)
+
+    monkeypatch.setattr(run_mod, "simulate_race", spy)
+    run_backtest(driver_race, sample_history, [2024], P, n_runs=20)
+    assert all(0.0 <= r < 1.0 for r in seen) and any(0.0 < r for r in seen)
+    seen.clear()
+    run_backtest(driver_race, sample_history, [2024], P, n_runs=20, observed_rain=True)
+    assert set(seen) <= {0.0, 1.0} and 1.0 in seen
+
+
+def test_ablation_records_rain_mode(driver_race, sample_history):
+    from f1pred.backtest.run import ABLATION_COLUMNS, ablation_backtest
+
+    assert "rain_mode" in ABLATION_COLUMNS
+    abl = ablation_backtest(driver_race, sample_history, [2024], P, n_runs=20, seed=1)
+    assert set(abl.rain_mode) == {"historical"}
+    abl = ablation_backtest(
+        driver_race, sample_history, [2024], P, n_runs=20, seed=1, observed_rain=True
+    )
+    assert set(abl.rain_mode) == {"observed"}

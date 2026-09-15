@@ -11,6 +11,16 @@ the rating they had going into that race. The backtest reads only that row, neve
 state after the race. A test checks that every history row used for a race carries that race's
 own id.
 
+## Rain in the backtest
+
+The same rule applies to the weather. On the Saturday evening nobody knows whether Sunday's race
+will be wet, so by default each past race is simulated with the circuit's historical wet rate
+computed from the races before it, exactly what `predict` falls back to when no forecast is
+available. Feeding the model the rainfall that was actually recorded (`--observed-rain`) is
+information from after the fact: it tells you how much a perfect forecast *could* be worth, and
+the README reports it as that upper bound, but it is not a score the model would have earned.
+The ablation CSV records which mode was used in its `rain_mode` column.
+
 ## The scores
 
 **Winner log loss** is "how surprised were we by the winner". If we gave the winner a 50%

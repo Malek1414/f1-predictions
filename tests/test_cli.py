@@ -286,6 +286,17 @@ def test_backtest_ablate(cache_dir, tmp_path):
     assert set(abl.variant) == {"base", "weather", "track", "full", "profile"}
 
 
+def test_backtest_observed_rain_flag(cache_dir, tmp_path):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    common = ["--seasons", "2024", "--runs", "50", "--ablate", "--cache-dir", str(cache_dir)]
+    r = runner.invoke(app, ["backtest", *common, "--out", str(tmp_path / "hist")])
+    assert r.exit_code == 0, r.output
+    assert set(pd.read_csv(tmp_path / "hist" / "ablation.csv").rain_mode) == {"historical"}
+    r = runner.invoke(app, ["backtest", *common, "--observed-rain", "--out", str(tmp_path / "obs")])
+    assert r.exit_code == 0, r.output
+    assert set(pd.read_csv(tmp_path / "obs" / "ablation.csv").rain_mode) == {"observed"}
+
+
 def test_profile_command(cache_dir):
     runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
     r = runner.invoke(app, ["profile", "--cache-dir", str(cache_dir)])

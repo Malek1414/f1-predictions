@@ -50,10 +50,17 @@ overrides the forecast. For a past race the observed `is_wet` is used as a certa
 
 ## Reading the ablation table
 
-`f1pred backtest --ablate` scores four variants: `base` (neither feature), `weather`, `track`,
-and `full`. Lower log loss and Brier are better. If `weather` does not beat `base`, the wet
-ratings are not adding information beyond the overall rating on those seasons; the same reading
-applies to `track`.
+`f1pred backtest --ablate` scores five variants: `base` (neither feature), `weather`, `track`,
+`full` (both, profile off) and `profile` (everything). Lower log loss and Brier are better. If
+`weather` does not beat `base`, the wet ratings are not adding information beyond the overall
+rating on those seasons; the same reading applies to `track`.
+
+The backtest does not know on Saturday what Sunday's weather will be, so by default it gives
+every past race the circuit's historical wet rate as of that date, the same fallback `predict`
+uses when the forecast is out of reach. That is the honest measure of what the weather layer
+adds. `--observed-rain` instead sets the rain probability to 1 or 0 from the rainfall that was
+actually recorded; the `weather` gain under that mode is what a perfect forecast could deliver,
+an upper bound rather than a result, and the ablation CSV marks each row's `rain_mode`.
 
 ## When Open-Meteo is unreachable
 

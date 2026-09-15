@@ -16,6 +16,7 @@ from f1pred.backtest.scoring import (
     winner_log_loss,
 )
 from f1pred.config import ModelParams
+from f1pred.data.weather import circuit_wet_rate
 from f1pred.ratings.conditional import strengths
 from f1pred.ratings.profile import Profile, profile_features, profile_lookup
 from f1pred.sim.dnf import dnf_cache_for_races
@@ -130,7 +131,11 @@ def run_backtest(
     seed: int = 0,
     dnf_cache: dict[tuple[int, str], float] | None = None,
     profiles: Mapping[tuple[int, str], Profile] | None = None,
+    observed_rain: bool = False,
 ) -> BacktestResult:
+    """Score each race from pre-race information. Rain defaults to the circuit's historical
+    wet rate as known before the race; `observed_rain=True` uses the race-day rainfall (1.0 or
+    0.0), which is an upper bound on what a forecast could deliver, not a fair score."""
     seasons = list(seasons)
     races = table[(~table["is_sprint"]) & (table["season"].isin(seasons))]
     race_ids = races.sort_values("date")["race_id"].unique()
@@ -151,13 +156,15 @@ def run_backtest(
                 f"(race_id {int(race_id)}). {REBUILD_HINT}"
             )
         entrants = entrants_for_past_race(race_rows, hist_rows, dnf_cache, params, profiles)
-        is_wet = bool(race_rows["is_wet"].iloc[0])
+        first = race_rows.iloc[0]
+        if not params.use_weather:
+            rain = 0.0
+        elif observed_rain:
+            rain = 1.0 if bool(first["is_wet"]) else 0.0
+        else:
+            rain = circuit_wet_rate(table, first.circuit_id, first.date)
         forecast = simulate_race(
-            entrants,
-            params,
-            n_runs=n_runs,
-            seed=seed + i,
-            rain_probability=1.0 if (params.use_weather and is_wet) else 0.0,
+            entrants, params, n_runs=n_runs, seed=seed + i, rain_probability=rain
         )
 
         classified = race_rows[race_rows["position"].notna()]
@@ -173,7 +180,6 @@ def run_backtest(
         pole = pole_baseline(grid)
         uni = uniform_baseline(ids)
 
-        first = race_rows.iloc[0]
         rows.append(
             {
                 "season": int(first.season),
@@ -219,6 +225,7 @@ ABLATION_COLUMNS = [
     "model_logloss",
     "model_brier",
     "model_spearman",
+    "rain_mode",
 ]
 
 
@@ -230,18 +237,29 @@ def ablation_backtest(
     n_runs: int = 10_000,
     seed: int = 0,
     dnf_cache: dict[tuple[int, str], float] | None = None,
+    observed_rain: bool = False,
 ) -> pd.DataFrame:
     """Spec 8.1: scores with and without weather, track type and the driver profile, per season
     plus an `all` row. `full` is weather and track with the profile off; `profile` is everything.
+    `rain_mode` records whether the weather variants saw the pre-race historical rate
+    (`historical`, the default) or the race-day rainfall (`observed`, an upper bound).
     """
     seasons = list(seasons)
     race_ids = table[(~table["is_sprint"]) & (table["season"].isin(seasons))]["race_id"].unique()
     if dnf_cache is None:
         dnf_cache = dnf_cache_for_races(table, race_ids, params)
+    rain_mode = "observed" if observed_rain else "historical"
     rows = []
     for name, flags in VARIANTS.items():
         result = run_backtest(
-            table, history, seasons, params.replace(**flags), n_runs, seed, dnf_cache
+            table,
+            history,
+            seasons,
+            params.replace(**flags),
+            n_runs,
+            seed,
+            dnf_cache,
+            observed_rain=observed_rain,
         )
         for r in result.seasons.itertuples(index=False):
             rows.append(
@@ -252,6 +270,7 @@ def ablation_backtest(
                     "model_logloss": r.model_logloss,
                     "model_brier": r.model_brier,
                     "model_spearman": r.model_spearman,
+                    "rain_mode": rain_mode,
                 }
             )
         rows.append(
@@ -262,6 +281,7 @@ def ablation_backtest(
                 "model_logloss": result.races.model_logloss.mean(),
                 "model_brier": result.races.model_brier.mean(),
                 "model_spearman": result.races.model_spearman.mean(),
+                "rain_mode": rain_mode,
             }
         )
     return pd.DataFrame(rows, columns=ABLATION_COLUMNS)
