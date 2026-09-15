@@ -43,3 +43,11 @@ def test_search_space_has_phase4_knobs():
     from f1pred.tune import SEARCH_SPACE
 
     assert {"shrink_wet", "shrink_track", "wet_noise_factor", "wet_dnf_factor"} <= set(SEARCH_SPACE)
+
+
+def test_search_space_has_profile_scales():
+    from f1pred.tune import SEARCH_SPACE
+
+    assert {"aggression_scale", "risk_noise_scale", "risk_dnf_scale", "form_scale"} <= set(
+        SEARCH_SPACE
+    )

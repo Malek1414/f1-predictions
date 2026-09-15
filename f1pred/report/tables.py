@@ -2,12 +2,13 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Iterable, Mapping
 
 import pandas as pd
 from rich.table import Table
 
 from f1pred.ratings.history import RatingState
+from f1pred.ratings.profile import Profile
 from f1pred.sim.race import RaceForecast
 from f1pred.sim.season import SeasonForecast
 
@@ -132,3 +133,28 @@ def title_tables(
             _pct(r.p_title),
         )
     return drivers, cons
+
+
+def profile_table(
+    profiles: Mapping[str, Profile], names: Mapping[str, str], drivers: Iterable[str]
+) -> Table:
+    """Spec 6.6 numbers for `drivers`, sorted by aggression; unknown drivers show as zero."""
+    table = Table(
+        title="Driver profile (aggression, risk, form)",
+        caption="aggression: places gained vs the field; risk: accident rate vs the field; "
+        "form: recent finishes vs expected. Positive is more aggressive, riskier, hotter.",
+    )
+    for col, justify in [
+        ("Driver", "left"),
+        ("Aggression", "right"),
+        ("Risk", "right"),
+        ("Form", "right"),
+        ("Races", "right"),
+    ]:
+        table.add_column(col, justify=justify)
+    rows = [(d, profiles.get(d, Profile.zero())) for d in drivers]
+    for d, p in sorted(rows, key=lambda dp: (-dp[1].aggression, dp[0])):
+        table.add_row(
+            names.get(d, d), f"{p.aggression:+.2f}", f"{p.risk:+.2f}", f"{p.form:+.2f}", str(p.n)
+        )
+    return table

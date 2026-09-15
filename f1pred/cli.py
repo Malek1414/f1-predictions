@@ -23,12 +23,20 @@ from f1pred.config import (
 )
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import DataUnavailableError, load_cached_tables, load_tables
+from f1pred.data.laps import download_lap1
 from f1pred.data.track_types import load_track_types, track_type_for
 from f1pred.data.weather import build_weather_table, circuit_wet_rate
 from f1pred.predict import UnknownRaceError, build_prediction_inputs, resolve_race
 from f1pred.ratings.history import RatingState, replay
+from f1pred.ratings.profile import latest_profiles
 from f1pred.report.charts import calibration_chart, position_heatmap, title_chart, win_chart
-from f1pred.report.tables import backtest_table, forecast_table, ratings_table, title_tables
+from f1pred.report.tables import (
+    backtest_table,
+    forecast_table,
+    profile_table,
+    ratings_table,
+    title_tables,
+)
 from f1pred.sim.race import simulate_race
 from f1pred.sim.season import (
     current_standings,
@@ -100,8 +108,20 @@ def data_update(cache_dir: Path = CacheDir) -> None:
     except Exception as exc:  # spec 10: Open-Meteo down entirely; keep going without rain
         console.print(f"[yellow]Weather unavailable ({exc}); all races treated as dry.[/yellow]")
         weather = None
+    try:
+        lap1 = download_lap1(cache_dir)
+    except Exception as exc:  # lap_times.csv is only needed for the aggression measure
+        console.print(
+            f"[yellow]Lap-1 positions unavailable ({exc}); "
+            "aggression uses race gains only.[/yellow]"
+        )
+        lap1 = None
     table = build_driver_race_table(
-        raw, start_season=params.start_season, weather=weather, track_types=load_track_types()
+        raw,
+        start_season=params.start_season,
+        weather=weather,
+        track_types=load_track_types(),
+        lap1=lap1,
     )
     table.to_parquet(cache_dir / DRIVER_RACE_FILE, index=False)
     races = table[~table.is_sprint]
@@ -112,6 +132,9 @@ def data_update(cache_dir: Path = CacheDir) -> None:
         f"{races.date.iloc[-1].date()}"
     )
     console.print(f"{n_wet} wet races (>= {params.wet_threshold_mm} mm in the race window)")
+    console.print(
+        f"Lap-1 positions for {100 * races.lap1_position.notna().mean():.0f}% of race rows"
+    )
 
 
 @ratings_app.command("build")
@@ -182,7 +205,9 @@ def backtest(
     runs: int = typer.Option(10_000, "--runs"),
     seed: int = typer.Option(0, "--seed"),
     ablate: bool = typer.Option(
-        False, "--ablate", help="Also score with and without weather and track type"
+        False,
+        "--ablate",
+        help="Also score with and without weather, track type and the driver profile",
     ),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
@@ -219,7 +244,7 @@ def _rain_line(probability: float, source: str) -> str:
 
 
 def _ablation_table(abl: pd.DataFrame) -> Table:
-    t = Table(title="Ablation: with and without weather and track type")
+    t = Table(title="Ablation: with and without weather, track type and the driver profile")
     for col in ["variant", "season", "races", "log loss", "Brier", "Spearman"]:
         t.add_column(col, justify="right" if col not in ("variant", "season") else "left")
     for r in abl.itertuples(index=False):
@@ -245,7 +270,7 @@ def season(
     """Drivers' and constructors' title odds for the rest of a season."""
     params = load_params()
     raw, table = _load_cached(cache_dir)
-    _, state = _load_ratings(cache_dir)
+    history, state = _load_ratings(cache_dir)
     seasons_available = sorted(raw["races"]["year"].unique().tolist())
     if season not in seasons_available:
         console.print(
@@ -266,7 +291,10 @@ def season(
     ]
     if not remaining:
         console.print(f"[yellow]Season {season} is complete; showing final standings.[/yellow]")
-    entrants_by_race = [season_entrants(table, state, season, r, params) for r in remaining]
+    profiles = latest_profiles(table, history, params) if params.use_profile else None
+    entrants_by_race = [
+        season_entrants(table, state, season, r, params, profiles) for r in remaining
+    ]
     driver_points, constructor_points, mapping = current_standings(table, season)
     forecast = simulate_season(
         season,
@@ -289,6 +317,33 @@ def season(
     forecast.constructors_frame().to_csv(out / f"{season}-constructors.csv", index=False)
     chart = title_chart(forecast, names, f"{season} championship odds", out / f"{season}-title.png")
     console.print(f"Chart: {chart}")
+
+
+@app.command()
+def profile(
+    season: int | None = typer.Option(
+        None, "--season", help="Show the entrants of that season's latest race (default: latest)"
+    ),
+    cache_dir: Path = CacheDir,
+) -> None:
+    """Aggression, risk and form for the drivers on the current grid. Spec 6.6."""
+    params = load_params()
+    _, table = _load_cached(cache_dir)
+    history, _ = _load_ratings(cache_dir)
+    races = table[~table.is_sprint]
+    if season is not None:
+        races = races[races.season == season]
+        if races.empty:
+            _fail(f"No completed races for {season}.", 2)
+    latest = races[races.race_id == races.sort_values("date").race_id.iloc[-1]]
+    names = dict(zip(table.driver_id, table.driver_name, strict=True))
+    profiles = latest_profiles(table, history, params)
+    console.print(profile_table(profiles, names, latest.driver_id.tolist()))
+    after = f"{latest.race_name.iloc[0]} {int(latest.season.iloc[0])}"
+    console.print(
+        f"Windows: {params.profile_window} races for aggression and risk, "
+        f"{params.form_window} for form; after {after}."
+    )
 
 
 @app.command()

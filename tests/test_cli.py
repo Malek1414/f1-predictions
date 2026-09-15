@@ -266,3 +266,27 @@ def test_backtest_ablate(cache_dir, tmp_path):
     assert r.exit_code == 0, r.output
     abl = pd.read_csv(tmp_path / "ablation.csv")
     assert set(abl.variant) == {"base", "weather", "track", "full", "profile"}
+
+
+def test_profile_command(cache_dir):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    r = runner.invoke(app, ["profile", "--cache-dir", str(cache_dir)])
+    assert r.exit_code == 0, r.output
+    assert "Aggression" in r.output and "Max Verstappen" in r.output
+
+
+def test_data_update_downloads_lap1(tmp_path, monkeypatch):
+    from f1pred.data import weather as weather_mod
+
+    def fake_download(repo_id, filename, repo_type):
+        name = Path(filename).name
+        if name == "lap_times.csv":
+            return str(SAMPLE_DIR / "lap1.csv")
+        return str(SAMPLE_DIR / name)
+
+    monkeypatch.setattr(hub, "hf_hub_download", fake_download)
+    monkeypatch.setattr(weather_mod, "fetch_race_rain_mm", lambda *a: 0.0)
+    r = runner.invoke(app, ["data", "update", "--cache-dir", str(tmp_path)])
+    assert r.exit_code == 0, r.output
+    assert (tmp_path / "lap1.parquet").exists()
+    assert pd.read_parquet(tmp_path / "driver_race.parquet").lap1_position.notna().any()

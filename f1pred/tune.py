@@ -12,6 +12,7 @@ import pandas as pd
 from f1pred.backtest.run import run_backtest
 from f1pred.config import DEFAULT_PARAMS, ModelParams
 from f1pred.ratings.history import replay
+from f1pred.ratings.profile import profile_features, profile_lookup
 from f1pred.sim.dnf import dnf_cache_for_races
 
 SEARCH_SPACE: dict[str, list[float]] = {
@@ -26,6 +27,11 @@ SEARCH_SPACE: dict[str, list[float]] = {
     "shrink_track": [4.0, 8.0, 16.0],
     "wet_noise_factor": [1.0, 1.5, 2.0],
     "wet_dnf_factor": [1.0, 1.5, 2.0],
+    # Phase 5 (spec 6.5)
+    "aggression_scale": [0.0, 5.0, 10.0, 20.0],
+    "risk_noise_scale": [0.0, 0.25, 0.5],
+    "risk_dnf_scale": [0.0, 0.25, 0.5],
+    "form_scale": [0.0, 5.0, 10.0],
 }
 
 
@@ -39,8 +45,19 @@ def objective(
 ) -> float:
     """Mean winner log loss over the training seasons for these params."""
     history, _ = replay(table, params)
+    # The profile lookup depends on `history` (and so on K), so it is rebuilt per candidate.
+    profiles = (
+        profile_lookup(profile_features(table, history, params)) if params.use_profile else None
+    )
     result = run_backtest(
-        table, history, list(train_seasons), params, n_runs=n_runs, seed=seed, dnf_cache=dnf_cache
+        table,
+        history,
+        list(train_seasons),
+        params,
+        n_runs=n_runs,
+        seed=seed,
+        dnf_cache=dnf_cache,
+        profiles=profiles,
     )
     return float(result.races["model_logloss"].mean())
 

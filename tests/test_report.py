@@ -85,3 +85,14 @@ def test_title_chart_writes_png(tmp_path):
     assert (
         title_chart(_season_forecast(), NAMES, "2025", tmp_path / "title.png").stat().st_size > 1000
     )
+
+
+def test_profile_table():
+    from f1pred.ratings.profile import Profile
+    from f1pred.report.tables import profile_table
+
+    t = profile_table(
+        {"d0": Profile(1.2, -0.3, 0.8, 12), "d1": Profile(-0.5, 0.9, -0.2, 4)}, NAMES, ["d0", "d1"]
+    )
+    text = _render(t)
+    assert "Driver 0" in text and "+1.20" in text and "-0.30" in text
