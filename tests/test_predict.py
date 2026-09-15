@@ -34,7 +34,9 @@ def test_resolve_unknown_lists_choices(raw_sample, driver_race):
 def test_past_race_inputs(raw_sample, driver_race, replayed):
     history, state = replayed
     ref = resolve_race(raw_sample, driver_race, 2024, round=8)
-    inputs = build_prediction_inputs(raw_sample, driver_race, history, state, ref, P)
+    # Phase 3 arithmetic holds with track ratings off (Phase 4 adds a track-type shrink).
+    params = P.replace(use_track=False)
+    inputs = build_prediction_inputs(raw_sample, driver_race, history, state, ref, params)
     assert inputs.use_grid and inputs.note is None
     assert len(inputs.entrants) == 20
     leclerc = next(e for e in inputs.entrants if e.driver_id == "leclerc")

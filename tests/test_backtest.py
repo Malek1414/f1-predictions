@@ -28,7 +28,9 @@ def test_entrants_use_pre_race_ratings(driver_race, sample_history):
     )
     rows = driver_race[(driver_race.race_id == race_id) & (~driver_race.is_sprint)]
     hist = sample_history[(sample_history.race_id == race_id) & (~sample_history.is_sprint)]
-    ents = entrants_for_past_race(rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, P)
+    # Phase 1 arithmetic holds with track ratings off (Phase 4 adds a track-type shrink).
+    params = P.replace(use_track=False)
+    ents = entrants_for_past_race(rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, params)
     assert len(ents) == len(rows)
     by_id = {e.driver_id: e for e in ents}
     h = hist.set_index("driver_id")
@@ -86,3 +88,42 @@ def test_calibration_table_bins():
     row = cal[cal.bin_low == 0.1].iloc[0]
     assert row.predicted == pytest.approx(0.15) and row.observed == pytest.approx(0.5)
     assert cal[cal.bin_low == 0.9].iloc[0].observed == 1.0
+
+
+def test_entrants_use_conditional_strengths(driver_race, sample_history):
+    from f1pred.ratings.conditional import strengths
+
+    brazil = driver_race[(driver_race.season == 2024) & (driver_race.circuit_id == "interlagos")]
+    race_id = int(brazil.race_id.iloc[0])
+    rows = driver_race[(driver_race.race_id == race_id) & (~driver_race.is_sprint)]
+    hist = sample_history[(sample_history.race_id == race_id) & (~sample_history.is_sprint)]
+    ents = entrants_for_past_race(rows, hist, {(race_id, d): 0.1 for d in rows.driver_id}, P)
+    h = hist.set_index("driver_id")
+    e = next(x for x in ents if x.driver_id == "max_verstappen")
+    r = h.loc["max_verstappen"]
+    dry, wet = strengths(
+        r.driver_rating_pre,
+        r.constructor_rating_pre,
+        r.driver_track_pre,
+        r.constructor_track_pre,
+        r.driver_track_n_pre,
+        r.constructor_track_n_pre,
+        r.driver_wet_pre,
+        r.constructor_wet_pre,
+        r.driver_wet_n_pre,
+        r.constructor_wet_n_pre,
+        P,
+    )
+    assert e.strength == pytest.approx(dry) and e.strength_wet == pytest.approx(wet)
+
+
+def test_base_variant_matches_flags_off(driver_race, sample_history):
+    from f1pred.backtest.run import ablation_backtest
+
+    off = P.replace(use_weather=False, use_track=False)
+    direct = run_backtest(driver_race, sample_history, [2024], off, n_runs=200, seed=1)
+    abl = ablation_backtest(driver_race, sample_history, [2024], P, n_runs=200, seed=1)
+    base = abl[(abl.variant == "base") & (abl.season == "2024")].iloc[0]
+    assert base.model_logloss == pytest.approx(direct.seasons.model_logloss.iloc[0])
+    assert set(abl.variant) == {"base", "weather", "track", "full"}
+    assert (abl.season == "all").sum() == 4

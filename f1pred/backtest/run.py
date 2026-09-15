@@ -16,6 +16,7 @@ from f1pred.backtest.scoring import (
     winner_log_loss,
 )
 from f1pred.config import ModelParams
+from f1pred.ratings.conditional import strengths
 from f1pred.sim.dnf import dnf_cache_for_races
 from f1pred.sim.race import Entrant, simulate_race
 
@@ -52,17 +53,35 @@ def entrants_for_past_race(
     params: ModelParams,
 ) -> list[Entrant]:
     hist = history_rows.set_index("driver_id")
+    conditional = "driver_wet_pre" in hist.columns
     out = []
     for r in race_rows.itertuples(index=False):
         h = hist.loc[r.driver_id]
+        if conditional:
+            dry, wet = strengths(
+                float(h.driver_rating_pre),
+                float(h.constructor_rating_pre),
+                float(h.driver_track_pre),
+                float(h.constructor_track_pre),
+                int(h.driver_track_n_pre),
+                int(h.constructor_track_n_pre),
+                float(h.driver_wet_pre),
+                float(h.constructor_wet_pre),
+                int(h.driver_wet_n_pre),
+                int(h.constructor_wet_n_pre),
+                params,
+            )
+        else:  # Phase 1 history without conditional columns
+            dry = wet = float(h.driver_rating_pre + h.constructor_rating_pre)
         out.append(
             Entrant(
                 driver_id=r.driver_id,
                 constructor_id=r.constructor_id,
-                strength=float(h.driver_rating_pre + h.constructor_rating_pre),
+                strength=dry,
                 grid=int(r.grid),
                 p_dnf=float(dnf_lookup[(int(r.race_id), r.driver_id)]),
                 low_confidence=bool(h.driver_races_pre < params.min_races_for_confidence),
+                strength_wet=wet,
             )
         )
     return out
@@ -107,7 +126,14 @@ def run_backtest(
         race_rows = races[races["race_id"] == race_id]
         hist_rows = race_history[race_history["race_id"] == race_id]
         entrants = entrants_for_past_race(race_rows, hist_rows, dnf_cache, params)
-        forecast = simulate_race(entrants, params, n_runs=n_runs, seed=seed + i)
+        is_wet = bool(race_rows["is_wet"].iloc[0]) if "is_wet" in race_rows.columns else False
+        forecast = simulate_race(
+            entrants,
+            params,
+            n_runs=n_runs,
+            seed=seed + i,
+            rain_probability=1.0 if (params.use_weather and is_wet) else 0.0,
+        )
 
         classified = race_rows[race_rows["position"].notna()]
         actual = dict(zip(classified["driver_id"], classified["position"].astype(int), strict=True))
@@ -152,3 +178,62 @@ def run_backtest(
     )
     calibration = calibration_table(np.array(all_p), np.array(all_won))
     return BacktestResult(race_df, season_df, calibration)
+
+
+VARIANTS = {
+    "base": {"use_weather": False, "use_track": False},
+    "weather": {"use_weather": True, "use_track": False},
+    "track": {"use_weather": False, "use_track": True},
+    "full": {"use_weather": True, "use_track": True},
+}
+ABLATION_COLUMNS = [
+    "variant",
+    "season",
+    "n_races",
+    "model_logloss",
+    "model_brier",
+    "model_spearman",
+]
+
+
+def ablation_backtest(
+    table: pd.DataFrame,
+    history: pd.DataFrame,
+    seasons: Iterable[int],
+    params: ModelParams,
+    n_runs: int = 10_000,
+    seed: int = 0,
+    dnf_cache: dict[tuple[int, str], float] | None = None,
+) -> pd.DataFrame:
+    """Spec 8.1: scores with and without weather and track type, per season plus an `all` row."""
+    seasons = list(seasons)
+    race_ids = table[(~table["is_sprint"]) & (table["season"].isin(seasons))]["race_id"].unique()
+    if dnf_cache is None:
+        dnf_cache = dnf_cache_for_races(table, race_ids, params)
+    rows = []
+    for name, flags in VARIANTS.items():
+        result = run_backtest(
+            table, history, seasons, params.replace(**flags), n_runs, seed, dnf_cache
+        )
+        for r in result.seasons.itertuples(index=False):
+            rows.append(
+                {
+                    "variant": name,
+                    "season": str(int(r.season)),
+                    "n_races": int(r.n_races),
+                    "model_logloss": r.model_logloss,
+                    "model_brier": r.model_brier,
+                    "model_spearman": r.model_spearman,
+                }
+            )
+        rows.append(
+            {
+                "variant": name,
+                "season": "all",
+                "n_races": len(result.races),
+                "model_logloss": result.races.model_logloss.mean(),
+                "model_brier": result.races.model_brier.mean(),
+                "model_spearman": result.races.model_spearman.mean(),
+            }
+        )
+    return pd.DataFrame(rows, columns=ABLATION_COLUMNS)
