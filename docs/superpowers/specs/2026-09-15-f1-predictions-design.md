@@ -30,7 +30,7 @@ Phases 1 and 2 come from the same simulation loop and ship together. A backtest 
 
 ### 3.1 Primary source: Hugging Face `tracinginsights/RaceData`
 
-A live mirror of the Ergast schema, 1950 through the current 2026 round, updated frequently. Tables used, each loaded with `datasets.load_dataset("tracinginsights/RaceData", "<table>")`:
+A live mirror of the Ergast schema, 1950 through the current 2026 round, updated frequently. Each table is a CSV at `data/<table>.csv` in the dataset repo, fetched with `huggingface_hub.hf_hub_download` (nulls are the literal `\N`). Tables used:
 
 | Table | Used for |
 |-------|----------|
@@ -41,7 +41,6 @@ A live mirror of the Ergast schema, 1950 through the current 2026 round, updated
 | `drivers`, `constructors`, `circuits` | names, codes, circuit latitude/longitude |
 | `status` | text for each status id, to classify DNFs |
 | `driver_standings`, `constructor_standings` | current points for season simulation |
-| `safety_cars` | per-circuit incident rate |
 | `lap_times` | position at the end of lap 1, for the aggression measure (Phase 5) |
 
 The dataset declares no license. It is derived from Ergast/Jolpica data (CC-BY style). Fine for a portfolio project; the README credits the source.
@@ -73,7 +72,8 @@ Everything downstream consumes one tidy table, one row per driver per race:
 | `status` | raw status text |
 | `dnf` | true if not classified due to accident, collision, or mechanical failure |
 | `dnf_kind` | `accident`, `mechanical`, `other`, or null |
-| `points` | race points scored |
+| `points` | points scored in this session |
+| `is_sprint` | true for sprint-race rows; their `date` is the sprint date |
 | `is_wet` (Phase 4) | race-day rainfall above threshold |
 | `track_type` (Phase 4) | from the mapping file |
 
@@ -175,7 +175,7 @@ p_dnf = shrink_toward(global_rate, blend(driver_recent_rate, constructor_recent_
 
 - Recent rates use the last `dnf_window` (default 20) races for the driver and constructor, blended 50/50.
 - Shrunk toward the global rate over the same window with `shrink_dnf` (default 10).
-- `circuit_factor` is the circuit's historical DNF rate divided by the global rate, clipped to [0.5, 2.0].
+- `circuit_factor` is the circuit's historical DNF rate (from results) divided by the global rate, clipped to [0.5, 2.0]; it is 1 until the circuit has 40 driver-race rows.
 - Phase 4: multiplied by `wet_dnf_factor` (fitted, expected around 1.5) in wet runs.
 
 ### 6.4 Outputs
@@ -246,7 +246,7 @@ A calibration chart bins all driver-race win probabilities into deciles and plot
 
 ### 8.1 Tuning
 
-`f1pred tune` runs a small grid search over `k_driver`, `k_constructor`, `sigma_team`, `sigma_driver`, `grid_bonus`, `regress_*`, optimising winner log loss on the seasons 2015 through 2022 and reporting the held-out scores on 2023 through 2025. The chosen values are written to `f1pred/config.py` with a comment recording the date and the held-out scores. Phase 4 adds the wet, track, and DNF factors to the grid and reports held-out scores with and without each. Phase 5 does the same for the three profile scales.
+`f1pred tune` runs coordinate descent (one parameter at a time over a short candidate list, two passes) over `k_driver`, `k_constructor`, `sigma_team`, `sigma_driver`, `grid_bonus`, `regress_constructor`, optimising winner log loss on the seasons 2015 through 2022 and reporting the held-out scores on 2023 through 2025. The chosen values are written to `f1pred/tuned.json` (only the fields that differ from the defaults, plus a note recording the date and scores); `load_params` reads that file on top of the defaults. Phase 4 adds the wet, track, and DNF factors to the grid and reports held-out scores with and without each. Phase 5 does the same for the three profile scales.
 
 Tuning and evaluation seasons are kept separate so the reported numbers in the README are honest.
 
