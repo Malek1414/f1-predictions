@@ -108,6 +108,16 @@ def test_history_columns_and_order(tiny_table):
         "driver_rating_pre",
         "constructor_rating_pre",
         "driver_races_pre",
+        "is_wet",
+        "track_type",
+        "driver_wet_pre",
+        "constructor_wet_pre",
+        "driver_wet_n_pre",
+        "constructor_wet_n_pre",
+        "driver_track_pre",
+        "constructor_track_pre",
+        "driver_track_n_pre",
+        "constructor_track_n_pre",
     ]
     assert history.date.is_monotonic_increasing
 
@@ -143,3 +153,54 @@ def test_replay_on_real_sample(driver_race):
     # Ergast driverRef for Max is "max_verstappen"; plain "verstappen" is Jos.
     assert top in {"max_verstappen", "norris", "leclerc", "piastri", "hamilton", "russell", "sainz"}
     assert max(state.constructor, key=state.constructor.get) in {"red_bull", "mclaren", "ferrari"}
+
+
+def test_conditional_ratings_update_only_on_matching_condition(tiny_table):
+    t = tiny_table.copy()
+    t["is_wet"] = [True, True, False, False, False, False]
+    t["track_type"] = ["street", "street", "mixed", "mixed", "street", "street"]
+    history, state = replay(t, P)
+    # race 1 was wet and street: a beat b
+    assert state.driver_wet["a"] > 1500 > state.driver_wet["b"]
+    assert state.driver_wet_n["a"] == 1 and state.driver_wet_n["b"] == 1
+    assert state.driver_track["street"]["a"] > 1500
+    assert (
+        "mixed" not in state.driver_track or state.driver_track_n.get("mixed", {}).get("a", 0) == 0
+    )
+    r3 = history[history.race_id == 3].set_index("driver_id")
+    assert r3.loc["a", "driver_wet_n_pre"] == 1 and r3.loc["a", "track_type"] == "street"
+    assert r3.loc["a", "driver_track_n_pre"] == 1
+    assert not r3.loc["a", "is_wet"]
+
+
+def test_replay_without_condition_columns_is_all_dry_mixed(tiny_table):
+    history, state = replay(tiny_table, P)
+    assert not history.is_wet.any() and history.track_type.eq("mixed").all()
+    assert state.driver_wet == {} and state.driver_wet_n == {}
+    assert state.driver_track_n["mixed"]["a"] == 2
+
+
+def test_state_json_roundtrip_with_conditionals(tiny_table, tmp_path):
+    _, state = replay(tiny_table, P)
+    state.to_json(tmp_path / "s.json")
+    assert RatingState.from_json(tmp_path / "s.json") == state
+
+
+def test_state_strengths_matches_conditional_helper(tiny_table):
+    from f1pred.ratings.conditional import effective_rating
+    from f1pred.ratings.history import state_strengths
+
+    _, state = replay(tiny_table, P)
+    dry, wet = state_strengths(state, "a", "x", "mixed", P)
+    d = state.driver["a"]
+    dt = effective_rating(
+        d, state.driver_track["mixed"]["a"], state.driver_track_n["mixed"]["a"], P.shrink_track
+    )
+    c = state.constructor["x"]
+    ct = effective_rating(
+        c,
+        state.constructor_track["mixed"]["x"],
+        state.constructor_track_n["mixed"]["x"],
+        P.shrink_track,
+    )
+    assert dry == pytest.approx(dt + ct) and wet == pytest.approx(dry)
