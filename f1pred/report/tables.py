@@ -9,6 +9,7 @@ from rich.table import Table
 
 from f1pred.ratings.history import RatingState
 from f1pred.sim.race import RaceForecast
+from f1pred.sim.season import SeasonForecast
 
 
 def _pct(x: float) -> str:
@@ -86,3 +87,48 @@ def backtest_table(seasons: pd.DataFrame) -> Table:
             values.append(str(int(v)) if key in ("season", "n_races") else f"{v:.2f}")
         table.add_row(*values)
     return table
+
+
+def title_tables(
+    forecast: SeasonForecast, names: Mapping[str, str], top: int = 10
+) -> tuple[Table, Table]:
+    drivers = Table(
+        title=f"{forecast.season} drivers' championship "
+        f"({forecast.n_remaining} races left, {forecast.n_runs:,} runs)"
+    )
+    for col, justify in [
+        ("#", "right"),
+        ("Driver", "left"),
+        ("Points now", "right"),
+        ("Exp. points", "right"),
+        ("Title", "right"),
+        ("Top 3", "right"),
+    ]:
+        drivers.add_column(col, justify=justify)
+    for i, r in enumerate(forecast.drivers_frame().head(top).itertuples(index=False), start=1):
+        drivers.add_row(
+            str(i),
+            names.get(r.driver_id, r.driver_id),
+            f"{r.current_points:.0f}",
+            f"{r.expected_points:.0f}",
+            _pct(r.p_title),
+            _pct(r.p_top3),
+        )
+    cons = Table(title=f"{forecast.season} constructors' championship")
+    for col, justify in [
+        ("#", "right"),
+        ("Constructor", "left"),
+        ("Points now", "right"),
+        ("Exp. points", "right"),
+        ("Title", "right"),
+    ]:
+        cons.add_column(col, justify=justify)
+    for i, r in enumerate(forecast.constructors_frame().head(top).itertuples(index=False), start=1):
+        cons.add_row(
+            str(i),
+            r.constructor_id,
+            f"{r.current_points:.0f}",
+            f"{r.expected_points:.0f}",
+            _pct(r.p_title),
+        )
+    return drivers, cons

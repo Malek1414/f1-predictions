@@ -13,6 +13,9 @@ import numpy as np  # noqa: E402
 import pandas as pd  # noqa: E402
 
 from f1pred.sim.race import RaceForecast  # noqa: E402
+from f1pred.sim.season import SeasonForecast  # noqa: E402
+
+MIN_SHOWN = 0.005
 
 
 def _save(fig, path: Path) -> Path:
@@ -68,4 +71,27 @@ def calibration_chart(calibration: pd.DataFrame, path: Path) -> Path:
     ax.set_ylabel("Observed win rate")
     ax.set_title("Calibration (bubble size = count)")
     ax.legend()
+    return _save(fig, path)
+
+
+def title_chart(forecast: SeasonForecast, names: Mapping[str, str], title: str, path: Path) -> Path:
+    d = forecast.drivers_frame()
+    d = d[d.p_title > MIN_SHOWN]
+    c = forecast.constructors_frame()
+    c = c[c.p_title > MIN_SHOWN]
+    fig, (ax1, ax2) = plt.subplots(
+        1, 2, figsize=(12, 0.4 * max(len(d), len(c), 3) + 1.5), gridspec_kw={"width_ratios": [3, 2]}
+    )
+    for ax, frame, key, label in [
+        (ax1, d, "driver_id", "Drivers"),
+        (ax2, c, "constructor_id", "Constructors"),
+    ]:
+        labels = [names.get(i, i) for i in frame[key]][::-1]
+        values = (100 * frame.p_title)[::-1]
+        ax.barh(labels, values, color="#e10600")
+        for i, v in enumerate(values):
+            ax.text(v + 0.3, i, f"{v:.1f}%", va="center", fontsize=8)
+        ax.set_xlabel("Title probability (%)")
+        ax.set_title(f"{label} ({forecast.n_remaining} races left)")
+    fig.suptitle(title)
     return _save(fig, path)
