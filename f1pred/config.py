@@ -51,7 +51,7 @@ def load_params(path: Path | None = None) -> ModelParams:
     path = TUNED_PARAMS_PATH if path is None else path
     if not path.exists():
         return DEFAULT_PARAMS
-    overrides = json.loads(path.read_text())
+    overrides = {k: v for k, v in json.loads(path.read_text()).items() if not k.startswith("_")}
     if "regulation_seasons" in overrides:
         overrides["regulation_seasons"] = tuple(overrides["regulation_seasons"])
     return DEFAULT_PARAMS.replace(**overrides)

@@ -113,3 +113,29 @@ def test_backtest_season_range_parsing(cache_dir, tmp_path):
     )
     assert r.exit_code == 0, r.output
     assert len(pd.read_csv(tmp_path / "backtest_seasons.csv")) == 2
+
+
+def test_tune_smoke(cache_dir, tmp_path, monkeypatch):
+    import f1pred.cli as cli
+    import f1pred.tune as tune_mod
+
+    monkeypatch.setattr(cli, "TUNED_PARAMS_PATH", tmp_path / "tuned.json")
+    monkeypatch.setattr(tune_mod, "SEARCH_SPACE", {"grid_bonus": [8.0, 12.0]})
+    r = runner.invoke(
+        app,
+        [
+            "tune",
+            "--train",
+            "2023",
+            "--test",
+            "2024",
+            "--passes",
+            "1",
+            "--runs",
+            "50",
+            "--cache-dir",
+            str(cache_dir),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert (tmp_path / "tuned.json").exists()

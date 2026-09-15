@@ -3,14 +3,22 @@
 from __future__ import annotations
 
 import logging
+from datetime import date
 from pathlib import Path
 
 import pandas as pd
 import typer
 from rich.console import Console
 
+from f1pred import tune as tune_mod
 from f1pred.backtest.run import run_backtest
-from f1pred.config import DEFAULT_CACHE_DIR, DEFAULT_OUTPUT_DIR, load_params
+from f1pred.config import (
+    DEFAULT_CACHE_DIR,
+    DEFAULT_OUTPUT_DIR,
+    DEFAULT_PARAMS,
+    TUNED_PARAMS_PATH,
+    load_params,
+)
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import DataUnavailableError, load_cached_tables, load_tables
 from f1pred.predict import UnknownRaceError, build_prediction_inputs, resolve_race
@@ -158,6 +166,37 @@ def backtest(
     console.print(
         f"Calibration chart: {calibration_chart(result.calibration, out / 'calibration.png')}"
     )
+
+
+@app.command()
+def tune(
+    train: str = typer.Option("2015-2022", "--train"),
+    test: str = typer.Option("2023-2025", "--test"),
+    passes: int = typer.Option(2, "--passes"),
+    runs: int = typer.Option(2000, "--runs"),
+    cache_dir: Path = CacheDir,
+) -> None:
+    """Search model parameters on the training seasons, report held-out seasons, save tuned.json."""
+    _, table = _load_cached(cache_dir)
+    train_seasons, test_seasons = _parse_seasons(train), _parse_seasons(test)
+    best, score = tune_mod.coordinate_descent(
+        table,
+        DEFAULT_PARAMS,
+        train_seasons,
+        space=tune_mod.SEARCH_SPACE,
+        passes=passes,
+        n_runs=runs,
+        log=console.print,
+    )
+    console.print(f"Best training log loss: {score:.4f}")
+    for label, params in [("default", DEFAULT_PARAMS), ("tuned", best)]:
+        history, _ = replay(table, params)
+        result = run_backtest(table, history, test_seasons, params, n_runs=runs, seed=0)
+        console.print(f"[bold]{label} params, held-out {test}[/bold]")
+        console.print(backtest_table(result.seasons))
+    note = f"tuned {date.today()} on {train}, held out {test}, train log loss {score:.4f}"
+    tune_mod.write_tuned(best, TUNED_PARAMS_PATH, note)
+    console.print(f"Wrote {TUNED_PARAMS_PATH}. Re-run `f1pred ratings build` to use it.")
 
 
 if __name__ == "__main__":

@@ -29,3 +29,9 @@ def test_replace_returns_new_params():
     p = DEFAULT_PARAMS.replace(k_driver=1.0)
     assert p.k_driver == 1.0
     assert isinstance(p, ModelParams)
+
+
+def test_load_params_ignores_underscore_keys(tmp_path):
+    path = tmp_path / "tuned.json"
+    path.write_text(json.dumps({"_note": "x", "k_driver": 30.0}))
+    assert load_params(path).k_driver == 30.0
