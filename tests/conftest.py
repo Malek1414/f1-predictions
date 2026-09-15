@@ -5,6 +5,7 @@ import pytest
 
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import TABLES, load_raw_from_dir
+from f1pred.data.weather import load_weather_csv
 
 SAMPLE_DIR = Path(__file__).parent / "fixtures" / "sample"
 
@@ -12,6 +13,11 @@ SAMPLE_DIR = Path(__file__).parent / "fixtures" / "sample"
 @pytest.fixture(scope="session")
 def raw_sample() -> dict:
     return load_raw_from_dir(SAMPLE_DIR)
+
+
+@pytest.fixture(scope="session")
+def weather_sample() -> pd.DataFrame:
+    return load_weather_csv(SAMPLE_DIR / "weather.csv")
 
 
 @pytest.fixture(scope="session")
