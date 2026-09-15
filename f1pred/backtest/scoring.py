@@ -27,10 +27,12 @@ def position_spearman(expected: Mapping[str, float], actual: Mapping[str, int]) 
     common = [d for d in expected if d in actual]
     if len(common) < 3:
         return math.nan
-    e = pd.Series([expected[d] for d in common])
-    a = pd.Series([actual[d] for d in common])
+    e = pd.Series([expected[d] for d in common]).rank()
+    a = pd.Series([actual[d] for d in common]).rank()
     # Spearman is Pearson on ranks; pandas' method="spearman" would pull in scipy.
-    return float(e.rank().corr(a.rank()))
+    if e.nunique() < 2 or a.nunique() < 2:
+        return math.nan  # a constant vector has no rank correlation
+    return float(e.corr(a))
 
 
 @dataclass

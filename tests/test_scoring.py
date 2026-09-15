@@ -49,3 +49,11 @@ def test_uniform_baseline():
     assert b.p_win == pytest.approx({k: 0.25 for k in "abcd"})
     assert b.p_podium == pytest.approx({k: 0.75 for k in "abcd"})
     assert len(set(b.expected_position.values())) == 1
+
+
+def test_position_spearman_constant_vector_is_nan_without_warning():
+    import warnings
+
+    with warnings.catch_warnings():
+        warnings.simplefilter("error")
+        assert math.isnan(position_spearman({"a": 1, "b": 2, "c": 3}, {"a": 20, "b": 20, "c": 20}))

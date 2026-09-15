@@ -89,6 +89,8 @@ MECHANICAL_STATUSES = {
     "Fuel",
     "Power loss",
     "Vibrations",
+    "Vibration",
+    "Safety switch",
     "Drivetrain",
     "Ignition",
     "Chassis",

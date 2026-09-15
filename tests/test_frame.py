@@ -191,3 +191,8 @@ def test_unknown_status_warns_once(caplog):
         classify_dnf("Brand new failure", False)
         classify_dnf("Brand new failure", False)
     assert sum("Brand new failure" in r.message for r in caplog.records) == 1
+
+
+@pytest.mark.parametrize("status", ["Vibration", "Safety switch"])
+def test_late_added_mechanical_statuses(status):
+    assert classify_dnf(status, False) == "mechanical"
