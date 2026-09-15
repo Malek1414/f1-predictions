@@ -2,7 +2,7 @@ import numpy as np
 import pytest
 
 from f1pred.config import DEFAULT_PARAMS
-from f1pred.sim.race import Entrant, simulate_race
+from f1pred.sim.race import Entrant, simulate_positions, simulate_race
 
 P = DEFAULT_PARAMS
 
@@ -84,3 +84,18 @@ def test_as_frame_sorted_and_prob():
     ]
     assert df.p_win.is_monotonic_decreasing
     assert f.prob("d0", "win") == pytest.approx(f.p_win[0])
+
+
+def test_simulate_positions_rows_are_permutations():
+    rng = np.random.default_rng(0)
+    positions, used_grid = simulate_positions(_field(), P, 50, rng)
+    assert positions.shape == (50, 20) and used_grid
+    for row in positions:
+        assert sorted(row.tolist()) == list(range(1, 21))
+
+
+def test_simulate_race_matches_positions_with_same_seed():
+    forecast = simulate_race(_field(), P, n_runs=300, seed=11)
+    positions, _ = simulate_positions(_field(), P, 300, np.random.default_rng(11))
+    p_win = (positions == 1).mean(axis=0)
+    np.testing.assert_allclose(p_win, forecast.p_win)

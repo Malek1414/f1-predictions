@@ -56,14 +56,14 @@ class RaceForecast:
         return float({"win": self.p_win, "podium": self.p_podium, "points": self.p_points}[kind][i])
 
 
-def simulate_race(
+def simulate_positions(
     entrants: list[Entrant],
     params: ModelParams,
-    n_runs: int = 10_000,
-    seed: int | None = None,
+    n_runs: int,
+    rng: np.random.Generator,
     use_grid: bool = True,
-) -> RaceForecast:
-    rng = np.random.default_rng(seed)
+) -> tuple[np.ndarray, bool]:
+    """One finishing order per run. Returns (positions of shape (n_runs, n), used_grid)."""
     n = len(entrants)
     strength = np.array([e.strength for e in entrants], dtype=float)
     p_dnf = np.array([e.p_dnf for e in entrants], dtype=float)
@@ -90,7 +90,19 @@ def simulate_race(
     order = np.argsort(-key, axis=1, kind="stable")  # order[r, k] = entrant index at position k+1
     positions = np.empty_like(order)
     np.put_along_axis(positions, order, np.arange(1, n + 1)[None, :].repeat(n_runs, 0), axis=1)
+    return positions, used_grid
 
+
+def simulate_race(
+    entrants: list[Entrant],
+    params: ModelParams,
+    n_runs: int = 10_000,
+    seed: int | None = None,
+    use_grid: bool = True,
+) -> RaceForecast:
+    rng = np.random.default_rng(seed)
+    n = len(entrants)
+    positions, used_grid = simulate_positions(entrants, params, n_runs, rng, use_grid)
     position_matrix = (
         np.stack([np.bincount(positions[:, i] - 1, minlength=n) for i in range(n)]).astype(float)
         / n_runs
