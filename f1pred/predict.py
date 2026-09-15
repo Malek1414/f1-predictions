@@ -24,7 +24,9 @@ from f1pred.sim.race import Entrant
 
 log = logging.getLogger(__name__)
 
-NO_QUALIFYING_NOTE = "No qualifying data yet; running without grid"
+NO_QUALIFYING_NOTE = (
+    "No qualifying data yet; lineup carried over from {race_name} {season} and grid ignored"
+)
 
 
 class UnknownRaceError(Exception):
@@ -137,7 +139,12 @@ def _future_entrants(
         races = table[~table["is_sprint"]]
         latest = races[races["race_id"] == races.sort_values("date")["race_id"].iloc[-1]]
         rows = [(r.driver_id, r.constructor_id, None, r.driver_name) for r in latest.itertuples()]
-        use_grid, note = False, NO_QUALIFYING_NOTE
+        use_grid, note = (
+            False,
+            NO_QUALIFYING_NOTE.format(
+                race_name=latest["race_name"].iloc[0], season=int(latest["season"].iloc[0])
+            ),
+        )
     entrants, names = [], {}
     for driver_id, constructor_id, grid, name in rows:
         dry, wet = state_strengths(season_state, driver_id, constructor_id, ref.track_type, params)

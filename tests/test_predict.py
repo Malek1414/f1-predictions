@@ -149,3 +149,16 @@ def test_prediction_inputs_include_profiles(raw_sample, driver_race, replayed):
     ref = resolve_race(raw_sample, table, 2024, round=24)
     inputs = build_prediction_inputs(raw_sample, table, history, state, ref, P)
     assert any(e.aggression != 0 for e in inputs.entrants)
+
+
+def test_no_qualifying_note_names_the_source_race(raw_sample, driver_race, replayed):
+    # Phase 6: the carried-over lineup says which race it came from.
+    history, state = replayed
+    raw = dict(raw_sample)
+    last_id = int(driver_race[driver_race.season == 2024].race_id.max())
+    raw["qualifying"] = raw_sample["qualifying"][raw_sample["qualifying"].raceId != last_id]
+    table = driver_race[driver_race.race_id != last_id]
+    ref = resolve_race(raw, table, 2024, round=24)
+    inputs = build_prediction_inputs(raw, table, history, state, ref, P)
+    assert "Qatar Grand Prix 2024" in inputs.note
+    assert "carried over" in inputs.note and "grid ignored" in inputs.note

@@ -168,3 +168,58 @@ def test_season_entrants_take_profiles(driver_race):
     )
     e = next(x for x in ents if x.driver_id == "max_verstappen")
     assert (e.aggression, e.risk, e.form) == (1.0, 0.5, 0.2)
+
+
+def _seats(ents):
+    return {(e.constructor_id, e.driver_id) for e in ents}
+
+
+def test_season_entrants_use_modal_driver_over_last_three_races(driver_race):
+    # Phase 6: Doohan stood in for Ocon at Alpine in Abu Dhabi 2024 only; the 2024 lineup
+    # comes from the last three races, so Ocon (2 of 3) keeps the seat.
+    _, state = replay(driver_race, P)
+    race = RemainingRace(999, 25, "Next", "bahrain", pd.Timestamp("2024-12-15"), False)
+    ents = season_entrants(driver_race, state, 2024, race, P)
+    seats = _seats(ents)
+    assert len(ents) == 20 and len(seats) == 20
+    assert ("alpine", "ocon") in seats and ("alpine", "doohan") not in seats
+    assert ("red_bull", "max_verstappen") in seats
+    assert all(sum(c == team for c, _ in seats) == 2 for team in {c for c, _ in seats})
+
+
+def test_season_entrants_stand_in_last_race_only_is_dropped(driver_race):
+    last_id = int(driver_race[driver_race.season == 2024].race_id.max())
+    table = driver_race.copy()
+    mask = (table.race_id == last_id) & (table.driver_id == "max_verstappen")
+    table.loc[mask, ["driver_id", "driver_name"]] = ["standin", "Stand In"]
+    _, state = replay(table, P)
+    race = RemainingRace(999, 25, "Next", "bahrain", pd.Timestamp("2024-12-15"), False)
+    seats = _seats(season_entrants(table, state, 2024, race, P))
+    assert ("red_bull", "max_verstappen") in seats
+    assert ("red_bull", "standin") not in seats
+    assert len(seats) == 20
+
+
+def test_season_entrants_tie_breaks_by_most_recent(driver_race):
+    # Alpine over the last three 2024 races: gasly 3, ocon (Las Vegas, Qatar), doohan (Abu
+    # Dhabi). Replace ocon in Qatar so ocon, the Qatar stand-in and doohan all have one race:
+    # the most recent, doohan, takes the seat.
+    ids = sorted(driver_race[driver_race.season == 2024].race_id.unique())[-3:]
+    table = driver_race.copy()
+    mask = (table.race_id == ids[1]) & (table.driver_id == "ocon")
+    table.loc[mask, ["driver_id", "driver_name"]] = ["standin", "Stand In"]
+    _, state = replay(table, P)
+    race = RemainingRace(999, 25, "Next", "bahrain", pd.Timestamp("2024-12-15"), False)
+    seats = _seats(season_entrants(table, state, 2024, race, P))
+    alpine = {d for c, d in seats if c == "alpine"}
+    assert alpine == {"gasly", "doohan"}
+
+
+def test_season_entrants_fall_back_to_last_race_with_few_races(driver_race):
+    # Fewer than three completed races in the season: the latest race's lineup, as before.
+    table = driver_race[(driver_race.season == 2023) | (driver_race["round"] <= 2)]
+    _, state = replay(table, P)
+    race = RemainingRace(999, 3, "Next", "bahrain", pd.Timestamp("2024-03-20"), False)
+    seats = _seats(season_entrants(table, state, 2024, race, P))
+    last = table[(~table.is_sprint) & (table.season == 2024) & (table["round"] == 2)]
+    assert seats == set(zip(last.constructor_id, last.driver_id, strict=True))

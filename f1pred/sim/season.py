@@ -104,6 +104,30 @@ def current_standings(
     return driver_points, constructor_points, latest.to_dict()
 
 
+def season_lineup(table: pd.DataFrame, season: int, recent: int = 3) -> pd.DataFrame:
+    """(driver_id, constructor_id) seats for the rest of `season`: the modal driver per
+    constructor seat over the last `recent` completed races of that season, so a one-off
+    stand-in does not get simulated for the remaining rounds. With fewer completed races the
+    latest race's lineup (any season) is used as before."""
+    races = table[~table["is_sprint"]]
+    in_season = races[races["season"] == season]
+    order = in_season.sort_values("date").drop_duplicates("race_id")["race_id"].tolist()
+    if len(order) < recent:
+        latest_id = races.sort_values("date")["race_id"].iloc[-1]
+        return races.loc[races["race_id"] == latest_id, ["driver_id", "constructor_id"]]
+    last = order[-recent:]
+    recency = {race_id: i for i, race_id in enumerate(last)}
+    rows = in_season[in_season["race_id"].isin(last)]
+    counts = (
+        rows.assign(recency=rows["race_id"].map(recency))
+        .groupby(["constructor_id", "driver_id"])
+        .agg(n=("race_id", "size"), last_seen=("recency", "max"))
+        .reset_index()
+        .sort_values(["constructor_id", "n", "last_seen"], ascending=[True, False, False])
+    )
+    return counts.groupby("constructor_id").head(2)[["driver_id", "constructor_id"]]
+
+
 def season_entrants(
     table: pd.DataFrame,
     state: RatingState,
@@ -112,14 +136,12 @@ def season_entrants(
     params: ModelParams,
     profiles: Mapping[str, Profile] | None = None,
 ) -> list[Entrant]:
-    """The latest race's grid as entrants; `profiles` (spec 6.6) is zero when None or missing."""
+    """The season's recent lineup (`season_lineup`) as entrants; `profiles` (spec 6.6) is zero
+    when None or missing."""
     season_state = state_for_season(state, season, params)
     profiles = {} if profiles is None else profiles
-    races = table[~table["is_sprint"]]
-    latest_id = races.sort_values("date")["race_id"].iloc[-1]
-    latest = races[races["race_id"] == latest_id]
     out = []
-    for r in latest.itertuples(index=False):
+    for r in season_lineup(table, season).itertuples(index=False):
         dry, wet = state_strengths(
             season_state, r.driver_id, r.constructor_id, race.track_type, params
         )
