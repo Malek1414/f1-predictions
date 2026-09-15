@@ -121,8 +121,8 @@ def main():
     data_note = (
         f"Data: Hugging Face tracinginsights/RaceData through the {latest_race.race_name} "
         f"{int(latest_race.season)} ({latest_race.date.date()}), Open-Meteo rain. "
-        "Model: driver + constructor Elo, Monte Carlo with team/driver noise, grid bonus, DNF layer, "
-        "wet and track-type ratings, driver profile."
+        "Model: driver + constructor Elo, Monte Carlo with team/driver noise, grid bonus, "
+        "DNF layer, wet and track-type ratings, driver profile."
     )
 
     # ---- Race ------------------------------------------------------------
@@ -311,7 +311,8 @@ def main():
         fig,
         "Driver profile: aggression, form and risk",
         f"Rolling {params.profile_window}-race windows ({params.form_window} for form), after the "
-        f"{latest_race.race_name} {int(latest_race.season)}. Positive is more aggressive, hotter, riskier.",
+        f"{latest_race.race_name} {int(latest_race.season)}. "
+        "Positive is more aggressive, hotter, riskier.",
     )
     grid_ids = [e.driver_id for e in inputs.entrants]
     prof = {d: profiles[d] for d in grid_ids if profiles and d in profiles}
@@ -427,7 +428,7 @@ def main():
     t.auto_set_font_size(False)
     t.set_fontsize(8.5)
     t.scale(1, 1.5)
-    for (i, j), c in t.get_celld().items():
+    for (i, _j), c in t.get_celld().items():
         c.set_edgecolor(GRID)
         c.set_linewidth(0.6)
         if i == 0:
