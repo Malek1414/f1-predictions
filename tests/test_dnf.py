@@ -59,8 +59,63 @@ def test_unknown_driver_gets_global_rate():
 def test_crash_prone_driver_shrinks_toward_global():
     t = _season(20, lambda i, d: d == "a")  # a always DNFs; global 25%
     p = dnf_probability(t, "a", "ta", "c1", pd.Timestamp("2021-01-01"), P)
-    # raw = (1.0 + 1.0)/2 = 1.0, n = 20 -> shrunk = 0.25 + 0.75 * 20/30 = 0.75; circuit factor 1
-    assert p == pytest.approx(0.75, abs=1e-9)
+    # raw = (1.0 + 1.0)/2 = 1.0; one car per team so n_d = n_c = 20 rows and the evidence count
+    # in races is n = (20 + 20/2)/2 = 15 -> shrunk = 0.25 + 0.75 * 15/25 = 0.70; circuit factor 1
+    assert p == pytest.approx(0.70, abs=1e-9)
+
+
+def _rows(start, n_races, drivers, dnf_for, circuit="c1", race_offset=0):
+    rows = []
+    for i in range(n_races):
+        for d in drivers:
+            rows.append(
+                (
+                    pd.Timestamp(start) + pd.Timedelta(days=i),
+                    race_offset + i,
+                    d,
+                    f"t{d}",
+                    circuit,
+                    dnf_for(i, d),
+                    False,
+                )
+            )
+    return rows
+
+
+def test_circuit_factor_uses_all_time_global():
+    # 400 older rows with 25% DNF then 400 recent rows with 5% DNF, all at circuit c1: the
+    # circuit rate equals the all-time global rate, so the factor must be 1.0 and p_dnf is the
+    # recent rate (not 1.7x it, as dividing by the recent-window rate would give).
+    older = _rows("2018-01-01", 100, "abcd", lambda i, d: d == "a")  # 1 of 4 = 25%
+    recent = _rows("2019-01-01", 100, "abcd", lambda i, d: d == "a" and i % 5 == 0, race_offset=100)
+    t = _table(older + recent)
+    recent_rate = 0.05  # last 400 rows: 20 DNFs of 400
+    p = dnf_probability(t, "zzz", "tzzz", "c1", pd.Timestamp("2021-01-01"), P)
+    assert p == pytest.approx(recent_rate, abs=1e-9)
+
+
+def test_evidence_count_in_races():
+    # Driver a: 20 races, all DNF. Constructor ta: two cars (a, a2), 40 rows, all DNF.
+    # Global 2 of 8 = 25%. n = (n_d + n_c / 2) / 2 = (20 + 20) / 2 = 20 -> weight 20/30.
+    drivers = ("a", "a2", "b", "c", "d", "e", "f", "g")
+    rows = []
+    for i in range(20):
+        for d in drivers:
+            team = "ta" if d in ("a", "a2") else f"t{d}"
+            rows.append(
+                (
+                    pd.Timestamp("2020-01-01") + pd.Timedelta(days=i),
+                    i,
+                    d,
+                    team,
+                    "c1",
+                    team == "ta",
+                    False,
+                )
+            )
+    t = _table(rows)
+    p = dnf_probability(t, "a", "ta", "c1", pd.Timestamp("2021-01-01"), P)
+    assert p == pytest.approx(0.25 + 0.75 * 20 / 30, abs=1e-9)
 
 
 def test_only_past_rows_count():

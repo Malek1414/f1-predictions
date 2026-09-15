@@ -25,16 +25,15 @@ def _global_rate(past: pd.DataFrame, params: ModelParams) -> float:
     return float(recent["dnf"].mean()) if len(recent) else DEFAULT_GLOBAL_RATE
 
 
-def _circuit_factor(
-    past: pd.DataFrame, circuit_id: str, global_rate: float, params: ModelParams
-) -> float:
+def _circuit_factor(past: pd.DataFrame, circuit_id: str, params: ModelParams) -> float:
+    """Circuit DNF rate over the all-time global rate of the same rows (one time base; the
+    recent-window rate is lower than the all-time one and would inflate every factor)."""
     circ = past[past["circuit_id"] == circuit_id]
-    if len(circ) < params.circuit_min_rows or global_rate <= 0:
+    all_time = float(past["dnf"].mean()) if len(past) else 0.0
+    if len(circ) < params.circuit_min_rows or all_time <= 0:
         return 1.0
     return float(
-        np.clip(
-            circ["dnf"].mean() / global_rate, params.circuit_factor_min, params.circuit_factor_max
-        )
+        np.clip(circ["dnf"].mean() / all_time, params.circuit_factor_min, params.circuit_factor_max)
     )
 
 
@@ -46,16 +45,17 @@ def _probability(
     c_rate, n_c = _rate(
         past.loc[past["constructor_id"] == constructor_id, "dnf"], params.dnf_window * 2
     )
+    # Evidence is counted in races: constructor rows are two per race.
     if n_d and n_c:
-        raw, n = (d_rate + c_rate) / 2, (n_d + n_c) / 2
+        raw, n = (d_rate + c_rate) / 2, (n_d + n_c / 2) / 2
     elif n_d:
         raw, n = d_rate, n_d
     elif n_c:
-        raw, n = c_rate, n_c
+        raw, n = c_rate, n_c / 2
     else:
         raw, n = global_rate, 0
     shrunk = global_rate + (raw - global_rate) * n / (n + params.shrink_dnf)
-    p = shrunk * _circuit_factor(past, circuit_id, global_rate, params)
+    p = shrunk * _circuit_factor(past, circuit_id, params)
     return float(np.clip(p, P_MIN, P_MAX))
 
 
