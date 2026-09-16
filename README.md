@@ -124,7 +124,9 @@ all for the constructor, because the car cancels out. Ratings regress toward 150
 of each season, constructors harder than drivers and harder still in rule-change years.
 See [docs/elo.md](docs/elo.md).
 
-**One simulated race.** A driver's performance is `driver + constructor + grid_bonus * (n - grid)`
+**One simulated race.** A driver's performance is
+`driver + constructor + grid_bonus * n / grid ** grid_shape` (concave since Phase 7a: pole
+versus P2 is worth half the full bonus at `grid_shape = 1`, P19 versus P20 almost nothing)
 plus one noise draw shared by both cars of the team and one private to the driver. Each driver
 is retired with their own DNF probability and sent to the back; survivors are sorted by
 performance. See [docs/monte-carlo.md](docs/monte-carlo.md).
@@ -245,6 +247,53 @@ the signal, and a 20-race window of places gained and accidents is too noisy to 
 
 ![Calibration](docs/results/backtest-calibration.png)
 
+### Phase 7a: concave grid and honest metrics
+
+The 2026 season showed that a linear grid term cannot price an upset: with each slot worth 25
+rating points, Antonelli's Monza win from P19 was given 0.01% (log loss 9.2 in one race). The
+grid term is now `grid_bonus * n / grid ** grid_shape`, concave, so the front rows matter a lot
+and the back rows barely at all. Re-tuning on 2015 to 2023 with `grid_shape` in the search space
+(`f1pred tune --train 2015-2023 --test 2024-2026 --passes 2 --runs 1500`) chose
+`grid_shape = 0.75`, `grid_bonus = 8`, `k_driver = 64`, `k_constructor = 48`,
+`teammate_weight = 3`, `regress_driver = 0.2`, `regress_constructor = 0.1`,
+`shrink_wet = shrink_track = 32`, `wet_dnf_factor = 1.0`, `shrink_profile = 2` and
+`risk_dnf_scale = 0.25`; training log loss fell from 1.2034 (linear term) to 1.1522. Monza 2026
+now gets a 6.0% win chance for Antonelli (log loss 2.8), and the worst race of 2024 to 2026 is
+Miami 2024 at 5.6, under the spec's ceiling of 7.
+
+Every score below carries a 90% bootstrap interval (1,000 resamples of the season's races;
+[docs/metrics.md](docs/metrics.md)). The folds are rolling-origin: 2024 to 2026 were never seen
+by the tuner, and `backtest --rolling 2024-2026` replays the ratings per fold. RPS is the ranked
+probability score over each driver's full finishing-position distribution (lower is better;
+flat is about 0.16); top-3 is the log loss of the exact podium set (uniform is 7.0).
+
+| Fold | Races | Log loss model | Log loss pole | RPS model | RPS pole | Top-3 model | Top-3 pole |
+|-----:|------:|:---------------|:--------------|:----------|:---------|------------:|-----------:|
+| 2024 | 24 | 1.69 [1.24, 2.17] | 2.89 [2.03, 3.74] | 0.098 [0.089, 0.108] | 0.123 [0.110, 0.137] | 3.78 | 7.31 |
+| 2025 | 24 | 1.20 [1.00, 1.42] | 1.61 [0.96, 2.46] | 0.109 [0.100, 0.118] | 0.132 [0.114, 0.149] | 3.33 | 5.79 |
+| 2026 | 14 | 1.69 [1.32, 2.03] | 1.98 [0.85, 3.10] | 0.098 [0.087, 0.110] | 0.116 [0.102, 0.132] | 3.91 | 7.26 |
+
+Over all 62 races (`backtest --seasons 2024-2026 --bootstrap 1000`): winner log loss 1.50
+[1.27, 1.74] against the pole baseline's 2.19 [1.61, 2.69]; RPS 0.102 [0.096, 0.109] against
+0.125 [0.115, 0.134]; expected calibration error 0.011 for win probabilities and 0.023 for
+podium probabilities; sharpness (mean top win probability) 0.50. The model beats the pole
+baseline on winner log loss in every fold, and its interval excludes the pole number in 2024 and
+2025 but not in 2026 (14 races). It beats pole on RPS in every fold with non-overlapping
+intervals, and on the podium set by 2.5 to 3.5 nats.
+
+Read the intervals before the means: a full point of 2024 winner log loss is the width of the
+interval, so the difference between this table and the Phase 6 one (1.74, 1.44 for 2024 and
+2025) is inside the noise. What is not noise is the floor: no race can cost more than about 6
+any more, and the same is true on the untuned defaults.
+
+Ablation on the same 62 races with the Phase 7a parameters, winner log loss (pre-race rain):
+base 1.594, weather 1.537, track 1.504, full 1.494, profile (the default) 1.500. The ordering
+is the Phase 6 one and every gap is inside the intervals above.
+
+The remaining structural limits, slow adaptation to a breakout season and no use of qualifying
+lap times, are the subject of Phase 7b, the Bayesian pace model
+([docs/superpowers/specs/2026-09-16-accuracy-upgrade-design.md](docs/superpowers/specs/2026-09-16-accuracy-upgrade-design.md)).
+
 ## Install and usage
 
 ```bash
@@ -257,7 +306,9 @@ uv run f1pred backtest --seasons 2023-2025         # score vs baselines; saves o
 uv run f1pred profile                              # aggression, risk and form for the drivers on the current grid
 uv run f1pred backtest --ablate                    # also score with and without weather, track type and the driver profile; saves outputs/ablation.csv
 uv run f1pred backtest --ablate --observed-rain    # same, but the weather variants see the race-day rainfall (an upper bound)
-uv run f1pred tune                                 # coordinate descent on 2015-2022, held-out report, writes f1pred/tuned.json
+uv run f1pred backtest --seasons 2024-2026 --bootstrap 1000   # add 90% bootstrap intervals; saves outputs/backtest_intervals.csv
+uv run f1pred backtest --rolling 2024-2026 [--tune]           # rolling-origin folds (optionally re-tuned per fold); saves outputs/rolling.csv
+uv run f1pred tune --train 2015-2023 --test 2024-2026         # coordinate descent, held-out report, writes f1pred/tuned.json
 ```
 
 Simulation commands take `--runs N`, `--seed N` and `--no-grid`; `predict` takes
@@ -269,15 +320,19 @@ new races. It also downloads the 25 MB `lap_times.csv` and keeps only the lap-1 
 
 ## Roadmap
 
-All five planned phases are done: data and the driver-race table (1), Elo ratings (2), the
-race and season Monte Carlo with the backtest and tuner (3), weather and track type (4), and
-the driver profile (5). Candidate next steps, none scheduled:
+Done: data and the driver-race table (1), Elo ratings (2), the race and season Monte Carlo with
+the backtest and tuner (3), weather and track type (4), the driver profile (5), the review fixes
+(6) and the concave grid with distribution-aware metrics and intervals (7a). Next, per the
+Phase 7 plan in `docs/superpowers/plans/`:
 
-- A qualifying-pace signal from FastF1 lap times, so the model sees car speed before the race
-  rather than only where it started.
-- Ratings that update inside a simulated season, so title odds reflect form swings and upgrades
-  instead of holding every rating fixed to the end of the year.
-- A small Streamlit dashboard over the cached outputs.
+- 7b: a Bayesian hierarchical Plackett–Luce pace model (NumPyro) with a qualifying lap-gap
+  likelihood, season-level driver effects and a DNF hazard, feeding posterior samples into the
+  existing simulation.
+- 7c: the walk-forward posterior backtest on the DGX Spark and the comparison against Phase 6
+  with intervals.
+
+Unscheduled: ratings that update inside a simulated season, and a small Streamlit dashboard
+over the cached outputs.
 
 ## Credits
 
@@ -295,8 +350,21 @@ reliability layer, shared team noise, leakage-safe backtests).
 
 ## Changelog
 
-Fixes from the post-Phase-5 code review (Phase 6); every number above was regenerated after
-them.
+Phase 7a (concave grid and honest metrics):
+
+- The grid term is `grid_bonus * n / grid ** grid_shape` instead of `grid_bonus * (n - grid)`;
+  `grid_shape` is tuned (0.75) and the no-grid fallback folds the term's actual spread into the
+  driver noise. Monza 2026 moves from a 0.01% to a 6% win chance for the winner.
+- New scores per race: ranked probability score over the finishing-position distribution and
+  the log loss of the exact podium set, for the model and both baselines; expected calibration
+  error and sharpness per run. `backtest --bootstrap R` adds 90% intervals,
+  `backtest --rolling 2024-2026 [--tune]` scores folds the tuner never saw
+  ([docs/metrics.md](docs/metrics.md)).
+- `tune` searches `grid_shape` and a smaller `grid_bonus` range; the objective can be any race
+  score column.
+
+Fixes from the post-Phase-5 code review (Phase 6); every number in the Phase 6 tables was
+regenerated after them.
 
 - Finishers are classified from `positionText`, not `position`. From 2025 the upstream CSV
   fills `position` with `positionOrder` for retirements (`positionText` is `R`, `W`, `D`, ...),

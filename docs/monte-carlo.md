@@ -11,12 +11,16 @@ Each entrant gets a performance number for this run:
 
 ```text
 performance = driver_rating + constructor_rating
-            + grid_bonus * (n_entrants - grid)
+            + grid_bonus * n_entrants / grid ** grid_shape
             + team_noise + driver_noise
 ```
 
 The first two terms are the Elo strength. The grid term rewards starting near the front, since
-track position is worth real time and overtaking is hard. Then two random draws are added.
+track position is worth real time and overtaking is hard. Since Phase 7a it is concave rather
+than linear: at `grid_shape = 1` pole is worth `grid_bonus * n`, P2 half of that and P20 one
+twentieth, so the front rows matter a lot and the back rows barely at all. A linear term had
+priced a win from P19 at zero (Monza 2026, log loss 9.2); the concave term gives it a few
+percent. Then two random draws are added.
 
 `team_noise` is one draw per constructor, shared by both of its cars. When a team brings an
 upgrade that works, or misjudges the setup window, both cars move together. Giving teammates
@@ -46,6 +50,7 @@ it takes well under a second.
 ## Running without a grid
 
 Before qualifying the grid is unknown. In `--no-grid` mode the grid term is dropped and its
-spread is folded into the driver noise: a uniform draw over `n` grid slots has standard
-deviation `n / sqrt(12)`, so `sigma_driver` becomes `sqrt(sigma_driver^2 + (grid_bonus * n)^2 / 12)`.
-The forecast gets wider, which is the honest thing to do when you know less.
+spread is folded into the driver noise: with the grid slot a uniform draw over `1..n`, the
+grid term has standard deviation `sigma_grid = std(grid_term(1..n))`, so `sigma_driver` becomes
+`sqrt(sigma_driver^2 + sigma_grid^2)`. The forecast gets wider, which is the honest thing to do
+when you know less.
