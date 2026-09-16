@@ -298,6 +298,58 @@ The remaining structural limits, slow adaptation to a breakout season and no use
 lap times, are the subject of Phase 7b, the Bayesian pace model
 ([docs/superpowers/specs/2026-09-16-accuracy-upgrade-design.md](docs/superpowers/specs/2026-09-16-accuracy-upgrade-design.md)).
 
+### Phase 7b: the Bayesian pace model
+
+A second model now lives alongside the Elo one: a hierarchical Plackett–Luce pace model fit with
+NumPyro. One latent pace per driver-race explains the finishing order, the qualifying gap to
+pole and the DNF hazard at the same time, and the Monte Carlo draws one posterior sample per run
+instead of a point strength. The maths, the priors and how to read the output are in
+[docs/pace-model.md](docs/pace-model.md).
+
+What landed:
+
+- `data/cache/driver_race.parquet` gains `quali_gap_pct`, the best qualifying lap as a percent
+  gap to pole, present for 99% of grand-prix rows since 2010 (`f1pred/data/qualifying.py`).
+- `f1pred/pace/` holds the design matrices, the NumPyro model, posterior save/load and the
+  bridge that turns posterior samples into simulation inputs.
+- New commands: `f1pred pace fit`, `f1pred pace summary`, `predict --model bayes`, and
+  `backtest --model bayes` (the walk-forward, one posterior fit per race, posteriors cached).
+- `ModelParams.model` stays `"elo"`. Nothing changes for existing commands.
+
+One full fit on the Mac (2010 to 2026: 7,223 driver-races, 343 races, 5,656 parameters; 1,000
+warmup and 1,000 samples on each of 4 chains) takes about 12 minutes on the M2's CPU — roughly
+two of compilation and 711 seconds of sampling — with **0 divergences**, max r_hat 1.048 and
+minimum ESS 51. Mercedes is the fastest 2026 car at +0.68 [-0.45, +1.84] pace units, ahead of
+Ferrari (+0.04) and McLaren (-0.02); Antonelli's 2026 season effect is +0.06 [-0.21, +0.36].
+Verstappen is the strongest driver at +0.98 [+0.41, +1.54].
+
+Baku 2026 (no qualifying yet, so both models ignore the grid), win probabilities:
+
+| Driver | Elo (7a) | Bayes |
+|---|---:|---:|
+| Norris | 23.9% | 11.3% |
+| Verstappen | 20.2% | 15.2% |
+| Antonelli | 19.4% | 13.5% |
+| Russell | 13.8% | 18.4% |
+| Piastri | 8.1% | 8.1% |
+
+The Bayesian model is much less sharp, and two things in the fit explain why. `tau_season`, the
+scale of the within-season driver deviation that is supposed to credit a breakout year, is
+estimated at 0.17 across all 394 driver-seasons, so no single season can move far; and
+`tau_form`, the within-season car-upgrade walk, comes out at 0.34 against a `HalfNormal(0.1)`
+prior, giving 3,433 per-constructor-per-race parameters enough freedom to absorb race-to-race
+noise. The qualifying likelihood then fits poorly (`sigma_q` = 1.65 percent, about the same as
+the raw within-race spread of the gaps, whose right tail reaches 45% in mixed-conditions
+sessions), so it contributes little of the pace signal it was added for. Antonelli out-qualified
+and out-scored Russell in 2026 and the model still puts them level.
+
+**Which model becomes the default is not decided here.** That needs the walk-forward comparison
+with intervals, which is one posterior fit per race and belongs on the DGX Spark
+(Tasks 10 to 12 of `docs/superpowers/plans/2026-09-16-phase-7-bayesian-pace-model.md`). The
+walk-forward code and its `backtest --model bayes` entry point are in place and tested; the
+Spark `make` targets, the full 2024–2026 run and the final comparison are still to come. Until
+then `--model bayes` is opt-in and Elo remains the default.
+
 ## Install and usage
 
 ```bash
@@ -313,6 +365,10 @@ uv run f1pred backtest --ablate --observed-rain    # same, but the weather varia
 uv run f1pred backtest --seasons 2024-2026 --bootstrap 1000   # add 90% bootstrap intervals; saves outputs/backtest_intervals.csv
 uv run f1pred backtest --rolling 2024-2026 [--tune]           # rolling-origin folds (optionally re-tuned per fold); saves outputs/rolling.csv
 uv run f1pred tune --train 2015-2023 --test 2024-2026         # coordinate descent, held-out report, writes f1pred/tuned.json
+uv run f1pred pace fit --device cpu                           # fit the Bayesian pace model (~12 min on an M2); writes data/cache/posteriors/latest.npz
+uv run f1pred pace summary                                    # driver skill and car pace for the latest season, with 90% intervals
+uv run f1pred predict --season 2026 --race baku --model bayes  # the same race from posterior samples instead of Elo ratings
+uv run f1pred backtest --model bayes --seasons 2024-2026      # walk-forward: one posterior fit per race (Spark job; --refit-every N to cut the cost)
 ```
 
 Simulation commands take `--runs N`, `--seed N` and `--no-grid`; `predict` takes
@@ -326,14 +382,15 @@ new races. It also downloads the 25 MB `lap_times.csv` and keeps only the lap-1 
 
 Done: data and the driver-race table (1), Elo ratings (2), the race and season Monte Carlo with
 the backtest and tuner (3), weather and track type (4), the driver profile (5), the review fixes
-(6) and the concave grid with distribution-aware metrics and intervals (7a). Next, per the
-Phase 7 plan in `docs/superpowers/plans/`:
+(6), the concave grid with distribution-aware metrics and intervals (7a) and the Bayesian pace
+model with its qualifying likelihood, DNF hazard and posterior-driven simulation (7b). Next, per
+the Phase 7 plan in `docs/superpowers/plans/`:
 
-- 7b: a Bayesian hierarchical Plackett–Luce pace model (NumPyro) with a qualifying lap-gap
-  likelihood, season-level driver effects and a DNF hazard, feeding posterior samples into the
-  existing simulation.
-- 7c: the walk-forward posterior backtest on the DGX Spark and the comparison against Phase 6
-  with intervals.
+- 7c: the Spark `make` targets and `spark/setup.sh`, the full walk-forward posterior backtest of
+  2024 to 2026, the comparison against Elo-7a with bootstrap intervals, and the decision on
+  which model becomes the default. The walk-forward itself is written and tested
+  (`f1pred/backtest/walkforward.py`, `backtest --model bayes`); what is missing is the hardware
+  to run 62 fits on.
 
 Unscheduled: ratings that update inside a simulated season, and a small Streamlit dashboard
 over the cached outputs.
@@ -353,6 +410,21 @@ variance in results); Kevocado's `F1_Predictor` and neevj2006's `F1_Race_Predict
 reliability layer, shared team noise, leakage-safe backtests).
 
 ## Changelog
+
+Phase 7b (Bayesian pace model):
+
+- `quali_gap_pct` in the driver-race table: the best qualifying lap as a percent gap to pole,
+  for 99% of grand-prix rows since 2010 (`f1pred/data/qualifying.py`).
+- `f1pred/pace/`: design matrices, a NumPyro hierarchical Plackett–Luce model with a qualifying
+  likelihood and a joint DNF hazard, posterior save/load with r_hat and ESS, and a bridge that
+  feeds posterior samples into the existing Monte Carlo one draw per run
+  ([docs/pace-model.md](docs/pace-model.md)).
+- `simulate_positions` takes `strength_samples` and `p_dnf_samples`; on that path it drops its
+  own grid term, forces `sigma_team` to 0 and uses the Gumbel-matched driver noise, because all
+  of it is inside the posterior pace.
+- New commands: `pace fit`, `pace summary`, `predict --model bayes`, `backtest --model bayes`
+  (walk-forward, one fit per race, posteriors cached under `data/cache/posteriors/`).
+- The Elo model is still the default; the comparison that would change it needs the Spark.
 
 Phase 7a (concave grid and honest metrics):
 

@@ -288,9 +288,11 @@ def fit(
         arrays,
         extra_fields=("diverging",),
     )
+    # JAX dispatches asynchronously, so `run` returns long before the chains are done; the
+    # elapsed time is only honest once the draws have actually been pulled back.
+    grouped = jax.block_until_ready(mcmc.get_samples(group_by_chain=True))
     seconds = time.perf_counter() - started
 
-    grouped = mcmc.get_samples(group_by_chain=True)
     stats = numpyro_summary(grouped, prob=0.9, group_by_chain=True)
     samples = {
         k: np.asarray(v, dtype=np.float32) for k, v in mcmc.get_samples().items() if k in KEEP
