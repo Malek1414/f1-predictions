@@ -66,6 +66,17 @@ class RaceForecast:
         return float({"win": self.p_win, "podium": self.p_podium, "points": self.p_points}[kind][i])
 
 
+def grid_term(grid: np.ndarray, n: int, params: ModelParams) -> np.ndarray:
+    """Concave grid advantage (spec 2.1): pole gets `grid_bonus * n`, P2 half of that at shape 1,
+    and the back rows are nearly indistinguishable."""
+    return params.grid_bonus * n / np.asarray(grid, dtype=float) ** params.grid_shape
+
+
+def no_grid_sigma(n: int, params: ModelParams) -> float:
+    """Spread of the grid term over a full field, folded into driver noise without a grid."""
+    return float(np.std(grid_term(np.arange(1, n + 1), n, params)))
+
+
 def simulate_positions(
     entrants: list[Entrant],
     params: ModelParams,
@@ -113,17 +124,17 @@ def simulate_positions(
 
     if used_grid:
         grid = np.array([e.grid for e in entrants], dtype=float)
-        grid_term = params.grid_bonus * (n - grid)
+        grid_pace = grid_term(grid, n, params)
         sigma_driver = params.sigma_driver
     else:
-        grid_term = np.zeros(n)
-        # A uniform draw over n grid slots has std n / sqrt(12); fold that into driver noise.
-        sigma_driver = float(np.sqrt(params.sigma_driver**2 + (params.grid_bonus * n) ** 2 / 12))
+        grid_pace = np.zeros(n)
+        # An unknown grid slot is a uniform draw over 1..n; fold its spread into driver noise.
+        sigma_driver = float(np.sqrt(params.sigma_driver**2 + no_grid_sigma(n, params) ** 2))
     driver_noise = rng.normal(0.0, sigma_driver, size=(n_runs, n)) * risk_noise[None, :]
 
     performance = (
         strength_run
-        + grid_term
+        + grid_pace
         + profile_pace[None, :]
         + team_noise * noise_scale
         + driver_noise * noise_scale

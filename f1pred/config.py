@@ -32,6 +32,7 @@ class ModelParams:
     sigma_team: float = 60.0
     sigma_driver: float = 80.0
     grid_bonus: float = 8.0
+    grid_shape: float = 1.0  # Phase 7a: grid_term = grid_bonus * n / grid ** grid_shape
     # DNF
     dnf_window: int = 20
     shrink_dnf: float = 10.0

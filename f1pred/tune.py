@@ -24,7 +24,9 @@ SEARCH_SPACE: dict[str, list[float]] = {
     "regress_constructor": [0.1, 0.2, 0.3, 0.4],
     "sigma_team": [15.0, 25.0, 40.0, 60.0],
     "sigma_driver": [25.0, 40.0, 60.0, 80.0],
-    "grid_bonus": [8.0, 12.0, 16.0, 20.0, 25.0, 30.0, 40.0],
+    # Phase 7a: the concave term is grid_bonus * n / grid ** grid_shape, so the scale is smaller.
+    "grid_bonus": [2.0, 4.0, 6.0, 8.0, 12.0],
+    "grid_shape": [0.3, 0.5, 0.75, 1.0, 1.5],
     "shrink_wet": [8.0, 16.0, 32.0],
     "shrink_track": [8.0, 16.0, 32.0],
     "wet_noise_factor": [1.0, 1.5],
