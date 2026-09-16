@@ -316,32 +316,51 @@ What landed:
   `backtest --model bayes` (the walk-forward, one posterior fit per race, posteriors cached).
 - `ModelParams.model` stays `"elo"`. Nothing changes for existing commands.
 
-One full fit on the Mac (2010 to 2026: 7,223 driver-races, 343 races, 5,656 parameters; 1,000
-warmup and 1,000 samples on each of 4 chains) takes about 12 minutes on the M2's CPU — roughly
-two of compilation and 711 seconds of sampling — with **0 divergences**, max r_hat 1.048 and
-minimum ESS 51. Mercedes is the fastest 2026 car at +0.68 [-0.45, +1.84] pace units, ahead of
-Ferrari (+0.04) and McLaren (-0.02); Antonelli's 2026 season effect is +0.06 [-0.21, +0.36].
-Verstappen is the strongest driver at +0.98 [+0.41, +1.54].
+One full fit on the Mac (2010 to 2026: 7,223 driver-races, 343 races, 5,657 parameters; 1,000
+warmup and 1,000 samples on each of 4 chains) takes about 22 minutes on the M2's CPU (1,317
+seconds from `mcmc.run` to the draws, compilation included; the Normal it replaced took 711)
+with **0 divergences**. Mercedes is the fastest 2026 car at +0.75 [-0.16, +1.64] pace units,
+ahead of Ferrari (+0.01) and McLaren (+0.00); Antonelli's 2026 season effect is +0.04
+[-0.07, +0.18]. Verstappen is the strongest driver at +0.72 [+0.32, +1.12].
 
-Baku 2026 (no qualifying yet, so both models ignore the grid), win probabilities:
+Baku 2026 (no qualifying yet, so both models ignore the grid), win probabilities from one run of
+each model on the same inputs:
 
 | Driver | Elo (7a) | Bayes |
 |---|---:|---:|
-| Norris | 23.9% | 11.3% |
-| Verstappen | 20.2% | 15.2% |
-| Antonelli | 19.4% | 13.5% |
-| Russell | 13.8% | 18.4% |
-| Piastri | 8.1% | 8.1% |
+| Norris | 23.7% | 12.1% |
+| Verstappen | 20.4% | 17.8% |
+| Antonelli | 19.3% | 13.3% |
+| Russell | 14.5% | 10.6% |
+| Piastri | 7.8% | 10.7% |
+| Leclerc | 7.0% | 11.6% |
 
-The Bayesian model is much less sharp, and two things in the fit explain why. `tau_season`, the
-scale of the within-season driver deviation that is supposed to credit a breakout year, is
-estimated at 0.17 across all 394 driver-seasons, so no single season can move far; and
-`tau_form`, the within-season car-upgrade walk, comes out at 0.34 against a `HalfNormal(0.1)`
-prior, giving 3,433 per-constructor-per-race parameters enough freedom to absorb race-to-race
-noise. The qualifying likelihood then fits poorly (`sigma_q` = 1.65 percent, about the same as
-the raw within-race spread of the gaps, whose right tail reaches 45% in mixed-conditions
-sessions), so it contributes little of the pace signal it was added for. Antonelli out-qualified
-and out-scored Russell in 2026 and the model still puts them level.
+**The qualifying likelihood now contributes.** It was written as a Normal, and the gap to pole
+has a long right tail — 8.4% of laps since 2010 are more than 5% off pole, 1.6% more than 10%,
+the worst 45.6% — so the junk laps set `sigma_q` by themselves. It came out at 1.65 percent,
+about the contaminated spread of 2.63 rather than the 1.46 the field actually covers, which left
+the pace structure explaining almost none of qualifying. As a Student-t the same structure fits
+`sigma_q` = 0.28 [0.27, 0.30] with `nu_q` = 1.42 [1.35, 1.49] — heavy enough to be nearly Cauchy,
+which is what a tail reaching 45% asks for. The residual is six times smaller because the wet
+sessions no longer have to be averaged into it.
+
+`kappa`, the pace-to-percent scale, barely moves (0.98 [0.93, 1.04] to 0.97 [0.92, 1.01]); it was
+always identified. What changed is how much of qualifying the model has to explain away, and the
+posterior is sharper for it: Verstappen's driver total narrows from ±0.57 to ±0.40, the Mercedes
+car interval from ±1.14 to ±0.90, and `tau_form`, the within-season car walk that was free enough
+to absorb race-to-race noise, falls from 0.34 to 0.25.
+
+Two things did not improve. `tau_season`, the within-season driver deviation that is supposed to
+credit a breakout year, drops from 0.17 to 0.07 across all 394 driver-seasons, so a single season
+moves even less than before and Antonelli and Russell are still level. And the sampler has a
+harder time: three of the 343 per-race qualifying intercepts do not mix at all (r_hat up to 12.7
+and ESS 2, against 1.03 before) — Spa 2011, Australia 2013 and Zandvoort 2023, each a session
+split between a wet and a dry running order, where a near-Cauchy likelihood has a real second
+mode over which half of the field to believe. `car_form`'s worst effective sample size falls from
+1,649 to 10 and `car`'s from 263 to 32, and the fit takes 22 minutes instead of 11. The
+intercepts are nuisance parameters that no prediction reads and `car` and `skill` stay at r_hat
+1.07 and below, but the headline diagnostic line now reports the worst of all 343 intercepts and
+reads far worse than the rest of the fit is.
 
 **Which model becomes the default is not decided here.** That needs the walk-forward comparison
 with intervals, which is one posterior fit per race and belongs on the DGX Spark
@@ -414,11 +433,14 @@ reliability layer, shared team noise, leakage-safe backtests).
 Phase 7b (Bayesian pace model):
 
 - `quali_gap_pct` in the driver-race table: the best qualifying lap as a percent gap to pole,
-  for 99% of grand-prix rows since 2010 (`f1pred/data/qualifying.py`).
-- `f1pred/pace/`: design matrices, a NumPyro hierarchical Plackett–Luce model with a qualifying
-  likelihood and a joint DNF hazard, posterior save/load with r_hat and ESS, and a bridge that
-  feeds posterior samples into the existing Monte Carlo one draw per run
-  ([docs/pace-model.md](docs/pace-model.md)).
+  for 99% of grand-prix rows since 2010 (`f1pred/data/qualifying.py`). A gap over
+  `MAX_PLAUSIBLE_GAP_PCT` (100%) is dropped with a warning — one row in the whole source, a 1995
+  lap that parses to 1,002,640 ms. Genuine wet outliers are kept.
+- `f1pred/pace/`: design matrices, a NumPyro hierarchical Plackett–Luce model with a Student-t
+  qualifying likelihood (`nu_q ~ Gamma(2, 0.1)`, so the wet and red-flagged sessions in the gap's
+  right tail cannot set `sigma_q` on their own) and a joint DNF hazard, posterior save/load with
+  r_hat and ESS, and a bridge that feeds posterior samples into the existing Monte Carlo one draw
+  per run ([docs/pace-model.md](docs/pace-model.md)).
 - `simulate_positions` takes `strength_samples` and `p_dnf_samples`; on that path it drops its
   own grid term, forces `sigma_team` to 0 and uses the Gumbel-matched driver noise, because all
   of it is inside the posterior pace.
