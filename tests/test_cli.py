@@ -450,3 +450,43 @@ def test_predict_rejects_an_unknown_model(cache_dir):
         ],
     )
     assert r.exit_code == 2 and "elo or bayes" in r.output
+
+
+def test_backtest_model_bayes_runs_walkforward(cache_dir, tmp_path, monkeypatch):
+    # Two 2024 races only, with tiny sampler settings: the point is the wiring, not the fit.
+    import f1pred.cli as cli
+
+    real = cli.walkforward
+
+    def small(table, seasons, params, fit_kwargs, cache, **kwargs):
+        ids = sorted(table[(table.season == 2024) & (~table.is_sprint)].race_id.unique())[:2]
+        trimmed = table[(table.season != 2024) | (table.race_id.isin(ids))]
+        tiny = {"num_warmup": 10, "num_samples": 10, "chains": 1}
+        return real(trimmed, seasons, params, tiny, cache, **kwargs)
+
+    monkeypatch.setattr(cli, "walkforward", small)
+    r = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--model",
+            "bayes",
+            "--seasons",
+            "2024",
+            "--runs",
+            "200",
+            "--cache-dir",
+            str(cache_dir),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert "Walk-forward over 24 races" in r.output
+    races = pd.read_csv(tmp_path / "walkforward_races.csv")
+    assert len(races) == 2
+
+
+def test_backtest_rejects_an_unknown_model(cache_dir):
+    r = runner.invoke(app, ["backtest", "--model", "wat", "--cache-dir", str(cache_dir)])
+    assert r.exit_code == 2 and "elo or bayes" in r.output

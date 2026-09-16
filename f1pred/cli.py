@@ -16,6 +16,7 @@ from f1pred import tune as tune_mod
 from f1pred.backtest.bootstrap import bootstrap_intervals
 from f1pred.backtest.rolling import INTERVAL_METRICS, rolling_origin
 from f1pred.backtest.run import ablation_backtest, run_backtest
+from f1pred.backtest.walkforward import walkforward
 from f1pred.config import (
     DEFAULT_CACHE_DIR,
     DEFAULT_OUTPUT_DIR,
@@ -346,13 +347,40 @@ def backtest(
     tune: bool = typer.Option(
         False, "--tune", help="With --rolling: re-tune on the seasons before each fold"
     ),
+    model: str = typer.Option(
+        None,
+        "--model",
+        help="elo (replayed ratings) or bayes (walk-forward: one posterior fit per race)",
+    ),
+    refit_every: int = typer.Option(
+        1, "--refit-every", min=1, help="With --model bayes: refit only every N races"
+    ),
+    device: str = typer.Option(None, "--device", help="With --model bayes: cpu or gpu"),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
 ) -> None:
     """Score the model on past seasons against the pole-wins and uniform baselines."""
     params = load_params()
+    model = model or params.model
+    if model not in ("elo", "bayes"):
+        _fail(f"Unknown --model {model!r}; use elo or bayes.", 2)
     _, table = _load_cached(cache_dir)
     out.mkdir(parents=True, exist_ok=True)
+    if model == "bayes":
+        _walkforward_backtest(
+            table,
+            params,
+            _parse_seasons(seasons),
+            refit_every,
+            device,
+            runs,
+            seed,
+            bootstrap,
+            observed_rain,
+            cache_dir,
+            out,
+        )
+        return
     if rolling is not None:
         _rolling_backtest(table, params, _parse_seasons(rolling), tune, runs, seed, bootstrap, out)
         return
@@ -391,6 +419,54 @@ def backtest(
         console.print(_ablation_table(abl))
         abl.to_csv(out / "ablation.csv", index=False)
         console.print(f"Ablation table: {out / 'ablation.csv'}")
+
+
+def _walkforward_backtest(
+    table: pd.DataFrame,
+    params,
+    season_list: list[int],
+    refit_every: int,
+    device: str | None,
+    runs: int,
+    seed: int,
+    bootstrap: int,
+    observed_rain: bool,
+    cache_dir: Path,
+    out: Path,
+) -> None:
+    """One posterior fit per race, each seeing only that race's past. This is the Spark job."""
+    fit_kwargs = {"device": device} if device else {}
+    n_races = table[(~table.is_sprint) & (table.season.isin(season_list))].race_id.nunique()
+    fits = -(-n_races // refit_every)
+    console.print(
+        f"Walk-forward over {n_races} races, {fits} fits "
+        f"(refit every {refit_every}); posteriors cached in {cache_dir / 'posteriors'}"
+    )
+    result = walkforward(
+        table,
+        season_list,
+        params,
+        fit_kwargs,
+        cache_dir,
+        n_runs=runs,
+        seed=seed,
+        refit_every=refit_every,
+        observed_rain=observed_rain,
+        progress=True,
+    )
+    console.print(backtest_table(result.seasons))
+    console.print(distribution_table(result.seasons))
+    console.print(
+        f"ECE win {result.ece_win:.4f}, ECE podium {result.ece_podium:.4f}, "
+        f"sharpness {result.sharpness:.3f} over {len(result.races)} races"
+    )
+    result.races.to_csv(out / "walkforward_races.csv", index=False)
+    result.seasons.to_csv(out / "walkforward_seasons.csv", index=False)
+    if bootstrap > 0:
+        ci = bootstrap_intervals(result.races, INTERVAL_METRICS, R=bootstrap, seed=seed)
+        console.print(interval_table(ci, f"{len(result.races)} races, R={bootstrap}"))
+        ci.to_csv(out / "walkforward_intervals.csv", index=False)
+    console.print(f"Rows: {out / 'walkforward_races.csv'}")
 
 
 def _rolling_backtest(

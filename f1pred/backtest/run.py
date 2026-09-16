@@ -188,49 +188,76 @@ def run_backtest(
             keep_positions=True,
         )
 
-        classified = race_rows[race_rows["position"].notna()]
-        actual = dict(zip(classified["driver_id"], classified["position"].astype(int), strict=True))
-        winner = next(d for d, pos in actual.items() if pos == 1)
-        podium = {d for d, pos in actual.items() if pos <= 3}
-        grid = dict(zip(race_rows["driver_id"], race_rows["grid"].astype(int), strict=True))
-
-        ids = forecast.driver_ids
-        p_win = dict(zip(ids, forecast.p_win, strict=True))
-        p_podium = dict(zip(ids, forecast.p_podium, strict=True))
-        expected = dict(zip(ids, forecast.expected_position, strict=True))
-        pole = pole_baseline(grid)
-        uni = uniform_baseline(ids)
-
-        rows.append(
-            {
-                "season": int(first.season),
-                "round": int(first["round"]),
-                "race_id": int(race_id),
-                "race_name": first.race_name,
-                "winner": winner,
-                "winner_p": p_win[winner],
-                "model_logloss": winner_log_loss(p_win, winner),
-                "pole_logloss": winner_log_loss(pole.p_win, winner),
-                "uniform_logloss": winner_log_loss(uni.p_win, winner),
-                "model_brier": podium_brier(p_podium, podium),
-                "pole_brier": podium_brier(pole.p_podium, podium),
-                "uniform_brier": podium_brier(uni.p_podium, podium),
-                "model_spearman": position_spearman(expected, actual),
-                "pole_spearman": position_spearman(pole.expected_position, actual),
-                "model_rps": mean_rps(forecast.position_matrix, ids, actual),
-                "pole_rps": mean_rps(pole.position_matrix(ids), ids, actual),
-                "uniform_rps": mean_rps(uni.position_matrix(ids), ids, actual),
-                "model_top3": top3_set_log_loss(forecast.positions, ids, podium),
-                "pole_top3": set_log_loss(pole.top3_set_prob(podium)),
-                "uniform_top3": set_log_loss(uni.top3_set_prob(podium)),
-            }
-        )
-        all_p.extend(forecast.p_win.tolist())
-        all_won.extend([1.0 if d == winner else 0.0 for d in ids])
-        all_p_podium.extend(forecast.p_podium.tolist())
-        all_on_podium.extend([1.0 if d in podium else 0.0 for d in ids])
+        row, extras = score_race(race_rows, forecast)
+        rows.append(row)
+        all_p.extend(extras["p_win"])
+        all_won.extend(extras["won"])
+        all_p_podium.extend(extras["p_podium"])
+        all_on_podium.extend(extras["on_podium"])
         win_vectors.append(forecast.p_win)
 
+    return assemble_result(rows, all_p, all_won, all_p_podium, all_on_podium, win_vectors)
+
+
+def score_race(race_rows: pd.DataFrame, forecast) -> tuple[dict, dict]:
+    """The scored row for one race, plus the per-driver vectors calibration and ECE need.
+
+    Shared by the Elo backtest and the Bayesian walk-forward so both are judged identically.
+    """
+    first = race_rows.iloc[0]
+    classified = race_rows[race_rows["position"].notna()]
+    actual = dict(zip(classified["driver_id"], classified["position"].astype(int), strict=True))
+    winner = next(d for d, pos in actual.items() if pos == 1)
+    podium = {d for d, pos in actual.items() if pos <= 3}
+    grid = dict(zip(race_rows["driver_id"], race_rows["grid"].astype(int), strict=True))
+
+    ids = forecast.driver_ids
+    p_win = dict(zip(ids, forecast.p_win, strict=True))
+    p_podium = dict(zip(ids, forecast.p_podium, strict=True))
+    expected = dict(zip(ids, forecast.expected_position, strict=True))
+    pole = pole_baseline(grid)
+    uni = uniform_baseline(ids)
+
+    row = {
+        "season": int(first.season),
+        "round": int(first["round"]),
+        "race_id": int(first.race_id),
+        "race_name": first.race_name,
+        "winner": winner,
+        "winner_p": p_win[winner],
+        "model_logloss": winner_log_loss(p_win, winner),
+        "pole_logloss": winner_log_loss(pole.p_win, winner),
+        "uniform_logloss": winner_log_loss(uni.p_win, winner),
+        "model_brier": podium_brier(p_podium, podium),
+        "pole_brier": podium_brier(pole.p_podium, podium),
+        "uniform_brier": podium_brier(uni.p_podium, podium),
+        "model_spearman": position_spearman(expected, actual),
+        "pole_spearman": position_spearman(pole.expected_position, actual),
+        "model_rps": mean_rps(forecast.position_matrix, ids, actual),
+        "pole_rps": mean_rps(pole.position_matrix(ids), ids, actual),
+        "uniform_rps": mean_rps(uni.position_matrix(ids), ids, actual),
+        "model_top3": top3_set_log_loss(forecast.positions, ids, podium),
+        "pole_top3": set_log_loss(pole.top3_set_prob(podium)),
+        "uniform_top3": set_log_loss(uni.top3_set_prob(podium)),
+    }
+    extras = {
+        "p_win": forecast.p_win.tolist(),
+        "won": [1.0 if d == winner else 0.0 for d in ids],
+        "p_podium": forecast.p_podium.tolist(),
+        "on_podium": [1.0 if d in podium else 0.0 for d in ids],
+    }
+    return row, extras
+
+
+def assemble_result(
+    rows: list[dict],
+    all_p: list[float],
+    all_won: list[float],
+    all_p_podium: list[float],
+    all_on_podium: list[float],
+    win_vectors: list[np.ndarray],
+) -> BacktestResult:
+    """Per-race rows into the season table, calibration table and whole-run scores."""
     race_df = pd.DataFrame(rows, columns=RACE_SCORE_COLUMNS)
     season_df = (
         race_df.groupby("season")
