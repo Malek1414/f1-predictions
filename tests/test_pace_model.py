@@ -7,6 +7,7 @@ from f1pred.config import DEFAULT_PARAMS
 from f1pred.pace.model import fit, plackett_luce_logp, predict_mu
 from f1pred.pace.posterior import Posterior
 from tests.synthetic_pace import (
+    LONG_SEASONS,
     SEASONS,
     FakeRace,
     contaminated_design,
@@ -18,6 +19,18 @@ from tests.synthetic_pace import (
 
 P = DEFAULT_PARAMS
 TINY = {"num_warmup": 80, "num_samples": 80, "chains": 1}
+UNWEIGHTED = P.replace(season_half_life=float("inf"))
+# "vet" is ordinary for five seasons and 2.0 quicker in the sixth, sharing car A with "ace".
+BREAKOUT = ("vet", 2023, 2.0)
+
+
+@pytest.fixture(scope="module")
+def planted_pair():
+    """The same planted breakout fit with the season age discount on and off."""
+    kw = {"breakout": BREAKOUT, "seasons": LONG_SEASONS}
+    weighted = fit(synthetic_design(seed=0, params=P, **kw), P, seed=0, **TINY)
+    unweighted = fit(synthetic_design(seed=0, params=UNWEIGHTED, **kw), UNWEIGHTED, seed=0, **TINY)
+    return weighted, unweighted
 
 
 def test_plackett_luce_matches_brute_force():
@@ -174,3 +187,133 @@ def test_grid_dict_overrides_the_entrant_grid(planted):
         post, design, [Entrant("ace", "A", 0.0, 1, 0.0)], FakeRace(2023), None, 0.0
     )
     np.testing.assert_allclose(from_dict, from_entrant)
+
+
+def _trace_sites(design) -> dict[str, str]:
+    """Every site the model declares on one pass, by name, with its type."""
+    from numpyro import handlers
+
+    from f1pred.pace.model import model_arrays, pace_model
+
+    arrays = model_arrays(design)
+    traced = handlers.trace(handlers.seed(pace_model, rng_seed=0))
+    return {name: site["type"] for name, site in traced.get_trace(design, P, arrays, True).items()}
+
+
+def test_nu_season_is_a_module_constant_not_a_sampled_site(planted):
+    """The Student-t tail on the season deviation is fixed, not learned.
+
+    Sampling its degrees of freedom would add a second global parameter on top of an already
+    funnel-shaped non-centred hierarchy. The heavy tail is there to let one exceptional
+    driver-season escape the shrinkage, not to estimate how heavy the tail is.
+    """
+    from f1pred.pace import model as pace_module
+
+    assert isinstance(pace_module.NU_SEASON, float)
+    assert pace_module.NU_SEASON > 2.0
+    design, _ = planted
+    sites = _trace_sites(design)
+    assert not any(name.startswith("nu_season") for name in sites)
+    assert sites["skill_season_raw"] == "sample"
+
+
+def test_nu_q_never_reaches_the_cauchy_region(planted):
+    """`nu_q >= 2` on every draw, so the qualifying likelihood always has a finite variance.
+
+    A near-Cauchy `nu_q` made the per-race intercepts of the wet/dry split sessions genuinely
+    bimodal and took three of them to r_hat 12.7 with ESS 2.
+    """
+    design, post = planted
+    nu_q = post.samples["nu_q"]
+    assert nu_q.shape == (post.n_samples,)
+    assert float(nu_q.min()) >= 2.0
+    sites = _trace_sites(design)
+    assert sites["nu_q"] == "deterministic"
+    assert sites["nu_q_raw"] == "sample"
+
+
+def test_a_planted_breakout_season_escapes_the_shrinkage():
+    """`vet` is average for two seasons, then 2.0 quicker in the third beside a strong teammate.
+
+    The Antonelli case in miniature: the breakout shares car A with `ace`, the quickest driver
+    in the field, so the car term cancels between them and only the driver terms can explain
+    the swap. The Normal season deviation this replaced recovered a mean of 0.4 to 0.9 on this
+    data with the lower bound under zero — pooled over every driver-season it had to shrink the
+    one real breakout with the bulk. The Student-t tail lets it through.
+    """
+    design = synthetic_design(seed=0, breakout=BREAKOUT, seasons=LONG_SEASONS)
+    post = fit(design, P, seed=0, **TINY)
+    table = post.driver_table(2023).set_index("driver_id")
+    assert table.loc["vet", "season"] > 1.0
+    assert table.loc["vet", "season_lo"] > 0.0  # the 90% interval is clear of zero
+    assert table.loc["vet", "season"] > table.loc["ace", "season"]
+
+
+def _log_density(design, params, latents):
+    from numpyro.infer.util import log_density
+
+    from f1pred.pace.model import model_arrays, pace_model
+
+    lp, _ = log_density(pace_model, (design, params, model_arrays(design), True), {}, latents)
+    return float(lp)
+
+
+def test_the_season_weight_scales_every_likelihood_term_and_no_prior(planted):
+    """Rescale every weight by a constant and the log-density must move linearly, from the prior.
+
+    `log_density(c) = prior + c * loglik` if and only if every likelihood term is scaled and no
+    prior is. Equal increments across c = 1, 2, 3 give the linearity; extrapolating back to
+    c = 0 must land on the prior exactly, which it would not if any one of the three terms had
+    been left unscaled. (numpyro's `scale` handler rejects a literal 0, hence the extrapolation.)
+    """
+    import dataclasses
+
+    from numpyro import handlers
+
+    from f1pred.pace.model import model_arrays, pace_model
+
+    design, _ = planted
+    trace = handlers.trace(handlers.seed(pace_model, rng_seed=0)).get_trace(
+        design, P, model_arrays(design), True
+    )
+    latents = {
+        k: s["value"]
+        for k, s in trace.items()
+        if s["type"] == "sample" and not s.get("is_observed")
+    }
+    prior = float(
+        sum(
+            np.sum(np.asarray(s["fn"].log_prob(s["value"])))
+            for k, s in trace.items()
+            if k in latents
+        )
+    )
+
+    def at(scale: float) -> float:
+        scaled = dataclasses.replace(
+            design,
+            row_weight=np.full(design.n_row, scale),
+            race_weight=np.full(design.n_race, scale),
+        )
+        return _log_density(scaled, P, latents)
+
+    one, two, three = at(1.0), at(2.0), at(3.0)
+    assert (three - two) == pytest.approx(two - one, rel=1e-4)
+    assert 2 * one - two == pytest.approx(prior, rel=1e-4)  # the intercept is the prior
+    assert one < prior  # the likelihood of 30 races is not a rounding error
+
+
+def test_discounting_older_seasons_credits_a_breakout_in_the_latest_one_more(planted_pair):
+    """The same planted 2023 breakout, fit with and without the season age discount.
+
+    Five ordinary seasons of `vet` pull `tau_season` toward zero and take the breakout with it.
+    Discounting them by age leaves the pooling less able to do that, so `tau_season` comes up and
+    more of the deviation survives on the season term where it belongs.
+    """
+    weighted, unweighted = planted_pair
+    got = weighted.driver_table(2023).set_index("driver_id").loc["vet", "season"]
+    base = unweighted.driver_table(2023).set_index("driver_id").loc["vet", "season"]
+    assert got > base
+    assert float(weighted.samples["tau_season"].mean()) > float(
+        unweighted.samples["tau_season"].mean()
+    )

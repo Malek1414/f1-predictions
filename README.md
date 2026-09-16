@@ -316,51 +316,142 @@ What landed:
   `backtest --model bayes` (the walk-forward, one posterior fit per race, posteriors cached).
 - `ModelParams.model` stays `"elo"`. Nothing changes for existing commands.
 
-One full fit on the Mac (2010 to 2026: 7,223 driver-races, 343 races, 5,657 parameters; 1,000
-warmup and 1,000 samples on each of 4 chains) takes about 22 minutes on the M2's CPU (1,317
-seconds from `mcmc.run` to the draws, compilation included; the Normal it replaced took 711)
-with **0 divergences**. Mercedes is the fastest 2026 car at +0.75 [-0.16, +1.64] pace units,
-ahead of Ferrari (+0.01) and McLaren (+0.00); Antonelli's 2026 season effect is +0.04
-[-0.07, +0.18]. Verstappen is the strongest driver at +0.72 [+0.32, +1.12].
+The default fit (2010 to 2026: 7,223 driver-races, 343 races, 5,657 parameters; 1,000 warmup and
+1,000 samples on each of 4 chains) takes about 11 minutes on the M2's CPU with **0 divergences**.
+Mercedes is the fastest 2026 car at +0.97 [+0.15, +1.80] pace units, ahead of Ferrari (+0.57) and
+McLaren (+0.28); Verstappen is the strongest driver at +0.86 [+0.48, +1.25]. Antonelli's 2026
+season effect is +0.02 [-0.05, +0.12].
 
 Baku 2026 (no qualifying yet, so both models ignore the grid), win probabilities from one run of
-each model on the same inputs:
+each model on the same inputs. `Bayes` is the shipped default (`season_half_life = 2`); the last
+column is the same model with the season age discount switched off, which is where the numbers
+published before this change sit:
 
-| Driver | Elo (7a) | Bayes |
+| Driver | Elo (7a) | Bayes | Bayes, no age discount |
+|---|---:|---:|---:|
+| Norris | 23.7% | 12.1% | 12.2% |
+| Verstappen | 20.4% | 11.6% | 17.4% |
+| Antonelli | 19.3% | 12.7% | 13.5% |
+| Russell | 14.5% | 15.9% | 11.1% |
+| Piastri | 7.8% | 9.7% | 10.6% |
+| Leclerc | 7.0% | 12.4% | 11.9% |
+| Hamilton | — | 12.6% | 9.8% |
+
+**The qualifying likelihood contributes.** It was written as a Normal, and the gap to pole has a
+long right tail — 8.4% of laps since 2010 are more than 5% off pole, 1.6% more than 10%, the
+worst 45.6% — so the junk laps set `sigma_q` by themselves. It came out at 1.65 percent, about
+the contaminated spread of 2.63 rather than the 1.46 the field actually covers, which left the
+pace structure explaining almost none of qualifying. As a Student-t the same structure fits
+`sigma_q` = 0.35 [0.34, 0.36]: the residual is nearly five times smaller because the wet sessions
+no longer have to be averaged into it. `kappa`, the pace-to-percent scale, is 0.97 [0.92, 1.02];
+it was always identified.
+
+The next two sections compare fits with the season age discount off, so that only one thing
+changes at a time; the third section is what the discount then does on top.
+
+**The sampler converges again.** Left free, `nu_q` fitted at 1.42 — effectively a Cauchy, which
+is what a tail reaching 45% asks for, but a Cauchy plus a per-race intercept makes a session that
+was split wet/dry genuinely bimodal: there are two defensible answers to which half of the field
+to believe. Spa 2011, Australia 2013 and Zandvoort 2023 are exactly that, and they took three of
+the 343 `alpha` intercepts to r_hat 12.7 with an ESS of 2, contaminating parameters that
+predictions do read. Bounding the degrees of freedom at 2 (`nu_q = 2 + Gamma(2, 0.5)`) fixes the
+whole fit, not just the intercepts:
+
+| | free `nu_q` | `nu_q >= 2` |
 |---|---:|---:|
-| Norris | 23.7% | 12.1% |
-| Verstappen | 20.4% | 17.8% |
-| Antonelli | 19.3% | 13.3% |
-| Russell | 14.5% | 10.6% |
-| Piastri | 7.8% | 10.7% |
-| Leclerc | 7.0% | 11.6% |
+| worst r_hat (all reported) | 12.68 | **1.04** |
+| min ESS (all reported) | 2.0 | **132** |
+| `car` min ESS | 32 | **208** |
+| `car_form` min ESS | 10 | **2,295** |
+| `sigma_q` | 0.28 [0.27, 0.30] | 0.35 [0.34, 0.36] |
+| wall time | 22 min | 21 min |
 
-**The qualifying likelihood now contributes.** It was written as a Normal, and the gap to pole
-has a long right tail — 8.4% of laps since 2010 are more than 5% off pole, 1.6% more than 10%,
-the worst 45.6% — so the junk laps set `sigma_q` by themselves. It came out at 1.65 percent,
-about the contaminated spread of 2.63 rather than the 1.46 the field actually covers, which left
-the pace structure explaining almost none of qualifying. As a Student-t the same structure fits
-`sigma_q` = 0.28 [0.27, 0.30] with `nu_q` = 1.42 [1.35, 1.49] — heavy enough to be nearly Cauchy,
-which is what a tail reaching 45% asks for. The residual is six times smaller because the wet
-sessions no longer have to be averaged into it.
+The cost is a wider `sigma_q`, which is the honest price of a thinner tail. Worth being plain
+about the mechanism: `nu_q` comes out at 2.010 [2.002, 2.023], piled up against its own floor.
+The likelihood still wants a Cauchy; what fixed the geometry is the bound, not the data agreeing.
 
-`kappa`, the pace-to-percent scale, barely moves (0.98 [0.93, 1.04] to 0.97 [0.92, 1.01]); it was
-always identified. What changed is how much of qualifying the model has to explain away, and the
-posterior is sharper for it: Verstappen's driver total narrows from ±0.57 to ±0.40, the Mercedes
-car interval from ±1.14 to ±0.90, and `tau_form`, the within-season car walk that was free enough
-to absorb race-to-race noise, falls from 0.34 to 0.25.
+**The breakout season is still not credited, and the data is the reason.** `skill_season`'s raw
+is now a Student-t with 4 degrees of freedom rather than a Normal, so the 394 driver-seasons that
+genuinely deviate very little can shrink to zero without dragging an exceptional one down with
+them, and `tau_season`'s hyperprior was widened from `HalfNormal(0.5)` to `HalfNormal(1.0)`. On
+synthetic data with a planted breakout the construction does exactly what it should — a +2.0
+season the Normal recovered at 0.4 to 0.9 with the lower bound under zero comes back above 1.0
+with a 90% interval clear of zero (`tests/test_pace_model.py`). On the real table it changes
+almost nothing:
 
-Two things did not improve. `tau_season`, the within-season driver deviation that is supposed to
-credit a breakout year, drops from 0.17 to 0.07 across all 394 driver-seasons, so a single season
-moves even less than before and Antonelli and Russell are still level. And the sampler has a
-harder time: three of the 343 per-race qualifying intercepts do not mix at all (r_hat up to 12.7
-and ESS 2, against 1.03 before) — Spa 2011, Australia 2013 and Zandvoort 2023, each a session
-split between a wet and a dry running order, where a near-Cauchy likelihood has a real second
-mode over which half of the field to believe. `car_form`'s worst effective sample size falls from
-1,649 to 10 and `car`'s from 263 to 32, and the fit takes 22 minutes instead of 11. The
-intercepts are nuisance parameters that no prediction reads and `car` and `skill` stay at r_hat
-1.07 and below, but the headline diagnostic line now reports the worst of all 343 intercepts and
-reads far worse than the rest of the fit is.
+| | Normal | Student-t |
+|---|---:|---:|
+| `tau_season` | 0.07 | 0.063 [0.009, 0.111] |
+| Antonelli 2026 season | +0.04 [-0.07, +0.18] | +0.05 [-0.07, +0.26] |
+| Russell 2026 season | not published | -0.03 [-0.19, +0.09] |
+
+`tau_season` barely moves under a four-times-wider hyperprior, so it is the data pinning it, not
+the prior. The tail is available and unused: across all 394 driver-seasons the largest posterior
+standardised deviation is Kubica in 2010 at 2.7, and none reaches 3 — under the t(4) prior alone
+about 20 of them should have. Antonelli's own is +0.7 [-1.4, +3.3], so his interval does reach
+into the tail the Normal would have denied him, which is why his upper bound moves from +0.18 to
++0.26 and why he now has the largest season effect on the grid. It is simply not enough to clear
+zero.
+
+The reason is that his 2026 is a smaller pace signal than the results table suggests. He won 8 of
+14, Russell 2, but in the same car he finished ahead of Russell in 8 of the 12 races both were
+classified and out-qualified him 8 times in 14, by an average of 0.125% of pole — about 0.13 pace
+units at `kappa` = 0.97. The model believes that: Antonelli minus Russell is +0.08 [-0.09, +0.34]
+on the season effect, P(Antonelli ahead) = 0.72, but on the total it is -0.02 [-0.24, +0.21] and
+P = 0.46, because Russell's career skill is the higher of the two (+0.38 against +0.28) and one
+season of a 0.13-unit edge does not overturn it. `beta_grid` = 2.53 is the rest of the story:
+track position is worth so much that out-qualifying a teammate by a tenth converts into a
+lopsided win count without a large difference in pace. Whether *that* is the defect is a separate
+question from the prior, and not one this change answers.
+
+**Recent seasons now count for more, and it helps the cars and hurts the drivers.** Every
+observation's likelihood contribution is discounted by the age of its season,
+`w = 0.5 ** (age / season_half_life)` with a half-life of 2 seasons, applied to all three
+likelihoods and to none of the priors. The reasoning is that within one season the regulations,
+the car, the teammate and the calendar are all held fixed, so a within-season comparison is much
+less confounded than a cross-season one; older seasons still contribute, at a discount.
+`season_half_life = inf` turns it off exactly.
+
+| | no age discount | half-life 2 (default) |
+|---|---:|---:|
+| `tau_season` | 0.063 [0.009, 0.111] | 0.031 [0.003, 0.074] |
+| `tau_skill` | 0.114 | 0.038 |
+| `tau_form` | 0.215 | 0.036 |
+| `sigma_q` | 0.35 [0.34, 0.36] | 0.47 [0.44, 0.50] |
+| Antonelli 2026 season | +0.05 [-0.07, +0.26] | +0.02 [-0.05, +0.12] |
+| Antonelli 2026 total | +0.34 | **-0.03** |
+| Russell 2026 total | +0.35 | +0.16 |
+| Verstappen 2026 total | +0.74 [+0.34, +1.13] | +0.86 [+0.48, +1.25] |
+| Mercedes 2026 car | +0.75 [-0.14, +1.64] | +0.97 [+0.15, +1.80] |
+| worst r_hat | 1.04 | 1.06 |
+| min ESS | 132 | 93 |
+| wall time | 21 min | 11 min |
+
+The car side is what the change was for and it delivers: Mercedes's 2026 pace is now clear of
+zero rather than straddling it, and the whole constructor table spreads out, because a 2026 car
+is no longer being averaged with a 2014 one. The fit is also half the length, which is simply
+what happens when the effective sample size drops.
+
+And that is the problem. Summing `0.5 ** (age / 2)` over 2010 to 2026 comes to 3.4 seasons of
+effective data out of 17 — about a fifth. Every variance component shrinks toward its prior with
+it: `tau_season` halves to 0.031, `tau_skill` falls by two thirds to 0.038, `tau_form` by six
+times. So the driver terms freeze. Antonelli's season effect drops from +0.05 to +0.02, his
+career skill from +0.28 to -0.04, and his 2026 total from +0.34 to **-0.03** — further behind
+Russell than before, not closer. On synthetic data with a long run-up the discount does raise
+`tau_season` and the recovered breakout, which is why the test asserts that; on the real table
+the loss of sample size wins instead. The car effects survive because their priors allow a wide
+step between seasons (`tau_car_reg` 0.79) while the driver walk is deliberately slow, so
+discounting history hits the drivers and not the cars.
+
+Baku shows the whole of it: Verstappen goes from 17.4% to 11.6% and sixth, while Russell leads at
+15.9%. That is the model tracking the 2026 constructor order more closely and the 2026 driver
+order less. `max_r_hat` also rises to 1.061, over the 1.05 the docs ask for before believing a
+fit, with `car` itself at 1.047 and min ESS down from 132 to 93.
+
+So the age discount is in, default 2.0 seasons as specified, off with
+`season_half_life = float("inf")`. On this evidence it is not obviously the right default, and it
+is not the fix for the breakout problem — it makes that one worse. The walk-forward is what
+should settle the half-life, and it can now search it as a parameter.
 
 **Which model becomes the default is not decided here.** That needs the walk-forward comparison
 with intervals, which is one posterior fit per race and belongs on the DGX Spark
@@ -437,10 +528,17 @@ Phase 7b (Bayesian pace model):
   `MAX_PLAUSIBLE_GAP_PCT` (100%) is dropped with a warning — one row in the whole source, a 1995
   lap that parses to 1,002,640 ms. Genuine wet outliers are kept.
 - `f1pred/pace/`: design matrices, a NumPyro hierarchical Plackett–Luce model with a Student-t
-  qualifying likelihood (`nu_q ~ Gamma(2, 0.1)`, so the wet and red-flagged sessions in the gap's
-  right tail cannot set `sigma_q` on their own) and a joint DNF hazard, posterior save/load with
-  r_hat and ESS, and a bridge that feeds posterior samples into the existing Monte Carlo one draw
-  per run ([docs/pace-model.md](docs/pace-model.md)).
+  qualifying likelihood (`nu_q = 2 + Gamma(2, 0.5)`, so the wet and red-flagged sessions in the
+  gap's right tail cannot set `sigma_q` on their own, while the floor at 2 keeps the likelihood
+  out of the Cauchy region where the wet/dry split sessions stop mixing) and a joint DNF hazard,
+  posterior save/load with r_hat and ESS, and a bridge that feeds posterior samples into the
+  existing Monte Carlo one draw per run ([docs/pace-model.md](docs/pace-model.md)).
+- The season deviation `skill_season` is a Student-t with 4 degrees of freedom scaled by
+  `tau_season`, not a Normal, so the driver-seasons that barely deviate can shrink to zero
+  without forcing an exceptional one down with them.
+- All three likelihoods weight each observation by the age of its season,
+  `0.5 ** (age / season_half_life)` with `ModelParams.season_half_life = 2.0`; the priors are
+  unweighted, and `float("inf")` disables the discount exactly.
 - `simulate_positions` takes `strength_samples` and `p_dnf_samples`; on that path it drops its
   own grid term, forces `sigma_team` to 0 and uses the Gumbel-matched driver noise, because all
   of it is inside the posterior pace.

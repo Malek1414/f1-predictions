@@ -38,11 +38,13 @@ class PaceDesign:
     position: np.ndarray  # 1-based finishing position, 0 = not classified
     dnf: np.ndarray
     quali_gap: np.ndarray  # percent gap to pole, NaN where unknown
+    row_weight: np.ndarray  # likelihood weight from the season's age; 1.0 in the latest season
     # Per race.
     race_start: np.ndarray
     race_len: np.ndarray
     race_n_classified: np.ndarray
     season_of_race: np.ndarray  # index into `seasons`
+    race_weight: np.ndarray  # `row_weight` for that race's season
     # Per group.
     previous_driver_season: np.ndarray  # -1 for a driver's first season
     previous_constructor_season: np.ndarray  # -1 for a constructor's first season
@@ -136,6 +138,20 @@ class PaceDesign:
         }
 
 
+def season_weight(seasons: np.ndarray, latest_season: int, half_life: float) -> np.ndarray:
+    """Exponential age discount: `0.5 ** (age_in_seasons / half_life)`, 1.0 in the latest season.
+
+    A season `half_life` years older counts half as much, twice that a quarter. `half_life` of
+    `inf` returns all ones, which is the unweighted likelihood exactly.
+    """
+    age = np.asarray(latest_season, dtype=float) - np.asarray(seasons, dtype=float)
+    if not np.isfinite(half_life):
+        return np.ones(np.shape(age), dtype=float)
+    if half_life <= 0.0:
+        raise ValueError(f"season_half_life must be positive or inf, got {half_life}")
+    return 0.5 ** (age / float(half_life))
+
+
 def _find(values: Sequence[Any], needle: Any) -> int:
     try:
         return list(values).index(needle)
@@ -216,6 +232,15 @@ def build_design(
         if "quali_gap_pct" in df.columns
         else np.full(len(df), np.nan)
     )
+    # Recent seasons are better evidence, so the likelihood discounts older ones (not the priors).
+    row_season = df["season"].to_numpy(dtype=int)
+    latest_season = int(seasons[-1])
+    row_weight = season_weight(row_season, latest_season, params.season_half_life)
+    race_weight = season_weight(
+        np.array([seasons[s] for s in season_of_race], dtype=int),
+        latest_season,
+        params.season_half_life,
+    )
     return PaceDesign(
         driver=np.array([driver_of[d] for d in df["driver_id"]], dtype=np.int32),
         driver_season=np.array(
@@ -238,10 +263,12 @@ def build_design(
         position=df["_pos"].to_numpy(dtype=np.int32),
         dnf=df["dnf"].to_numpy(dtype=bool),
         quali_gap=quali,
+        row_weight=row_weight,
         race_start=race_start,
         race_len=counts.astype(np.int32),
         race_n_classified=n_classified,
         season_of_race=season_of_race,
+        race_weight=race_weight,
         previous_driver_season=previous_driver_season,
         previous_constructor_season=previous_constructor_season,
         previous_constructor_race=previous_constructor_race,

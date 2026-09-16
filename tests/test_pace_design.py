@@ -4,7 +4,7 @@ import pytest
 
 from f1pred.config import DEFAULT_PARAMS
 from f1pred.data.track_types import TRACK_TYPES
-from f1pred.pace.design import build_design, target_design
+from f1pred.pace.design import build_design, season_weight, target_design
 from f1pred.sim.race import Entrant
 
 P = DEFAULT_PARAMS
@@ -104,3 +104,34 @@ def test_target_design_maps_known_and_unknown_entrants(design, driver_race):
     assert design.constructor_season_keys[cs] == ("red_bull", 2024)
     assert design.circuit_ids[ci] == "monaco"
     assert out["nobody"] == (-1, -1, ci)
+
+
+def test_season_weight_is_one_in_the_latest_season_and_halves_every_half_life():
+    w = season_weight(np.array([2026, 2025, 2024, 2022, 2018]), 2026, 2.0)
+    np.testing.assert_allclose(w, [1.0, 2**-0.5, 0.5, 0.25, 0.0625])
+
+
+def test_an_infinite_half_life_disables_the_weighting_exactly(driver_race):
+    """The unweighted likelihood stays reachable: every weight is exactly 1.0, not merely close."""
+    off = build_design(driver_race, params=P.replace(season_half_life=float("inf")))
+    assert (off.row_weight == 1.0).all()
+    assert (off.race_weight == 1.0).all()
+
+
+def test_row_weights_are_one_in_the_latest_season_and_decay_monotonically_with_age(
+    driver_race, design
+):
+    latest = max(design.seasons)
+    row_season = np.asarray([design.seasons[s] for s in design.season_of_race])[design.race]
+    assert (design.row_weight[row_season == latest] == 1.0).all()
+    # One weight per season, oldest first: strictly increasing toward the present, never above 1.
+    by_season = [design.row_weight[row_season == s] for s in sorted(design.seasons)]
+    per_season = [float(np.unique(w).item()) for w in by_season]
+    assert per_season == sorted(per_season)
+    assert all(0.0 < w <= 1.0 for w in per_season)
+    assert np.diff(per_season).min() > 0
+    # The per-race version agrees with the rows it covers.
+    race_season = np.asarray([design.seasons[s] for s in design.season_of_race])
+    np.testing.assert_allclose(
+        design.race_weight, season_weight(race_season, latest, P.season_half_life)
+    )

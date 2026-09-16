@@ -19,7 +19,9 @@ CIRCUITS = ("alpha", "beta", "gamma", "delta", "epsilon")
 KAPPA = 1.0
 
 
-def true_pace(breakout: tuple[str, int, float] | None = None) -> dict:
+def true_pace(
+    breakout: tuple[str, int, float] | None = None, seasons: tuple[int, ...] = SEASONS
+) -> dict:
     """(driver, season, delta) raises that driver's pace in that season only."""
 
     def pace(driver: str, car: str, season: int) -> float:
@@ -32,17 +34,21 @@ def true_pace(breakout: tuple[str, int, float] | None = None) -> dict:
         (d, car, s): pace(d, car, s)
         for car, drivers in LINEUP.items()
         for d in drivers
-        for s in SEASONS
+        for s in seasons
     }
 
 
-def synthetic_table(seed: int = 0, breakout: tuple[str, int, float] | None = None) -> pd.DataFrame:
+def synthetic_table(
+    seed: int = 0,
+    breakout: tuple[str, int, float] | None = None,
+    seasons: tuple[int, ...] = SEASONS,
+) -> pd.DataFrame:
     """One row per driver-race with planted paces, Plackett-Luce orders and matching quali gaps."""
     rng = np.random.default_rng(seed)
-    pace = true_pace(breakout)
+    pace = true_pace(breakout, seasons)
     entries = [(d, car) for car, drivers in LINEUP.items() for d in drivers]
     rows, race_id = [], 1
-    for season in SEASONS:
+    for season in seasons:
         for rnd in range(1, RACES_PER_SEASON + 1):
             mu = np.array([pace[(d, c, season)] for d, c in entries])
             # Qualifying first: the gap to pole is kappa * (pole pace - own pace) plus noise.
@@ -88,8 +94,18 @@ def synthetic_table(seed: int = 0, breakout: tuple[str, int, float] | None = Non
     return table
 
 
-def synthetic_design(seed: int = 0, breakout: tuple[str, int, float] | None = None):
-    return build_design(synthetic_table(seed, breakout), params=DEFAULT_PARAMS)
+def synthetic_design(
+    seed: int = 0,
+    breakout: tuple[str, int, float] | None = None,
+    params=DEFAULT_PARAMS,
+    seasons: tuple[int, ...] = SEASONS,
+):
+    return build_design(synthetic_table(seed, breakout, seasons), params=params)
+
+
+# A longer run-up than the three-season default, for the tests that need the model to have
+# enough history for the season-age discount and the season-deviation pooling to bite.
+LONG_SEASONS = tuple(range(2018, 2024))
 
 
 JUNK_FLOOR = 1.5  # a junk lap is at least this far off pole, then exponentially further

@@ -64,6 +64,11 @@ class ModelParams:
     pace_num_samples: int = 1000
     pace_chains: int = 4
     pace_device: str = "cpu"
+    # Seasons of half-life for the likelihood's exponential age discount. Within one season the
+    # regulations, the car, the teammate and the calendar are held fixed, so a within-season
+    # comparison is far less confounded than a cross-season one; older seasons still carry
+    # information but should not count the same as what is happening now. `inf` disables it.
+    season_half_life: float = 2.0
     # "elo" (phases 1 to 6) or "bayes" (the posterior pace model). One pace unit is worth
     # `pace_scale` rating points, so the existing reports keep their Elo semantics.
     model: str = "elo"

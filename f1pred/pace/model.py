@@ -28,6 +28,15 @@ FIRST_SKILL_SD = 1.0
 FIRST_CAR_SD = 1.5
 HAZARD_SD = 0.5
 H0_LOC, H0_SD = -2.0, 1.0
+# Degrees of freedom of the season deviation's Student-t, fixed rather than sampled: a second
+# global parameter on top of an already funnel-shaped non-centred hierarchy would cost more in
+# geometry than it buys in fit. 4 is heavy enough for an outlier to survive the pooling.
+NU_SEASON = 4.0
+# The qualifying Student-t's degrees of freedom are `NU_Q_FLOOR + Gamma(2, 0.5)`, so `nu_q >= 2`
+# and the likelihood always has a finite variance. Left free it went to 1.42, effectively a
+# Cauchy, which gave the wet/dry split sessions a real second mode over which half of the field
+# to believe and took three per-race intercepts to r_hat 12.7.
+NU_Q_FLOOR = 2.0
 # Saved from a fit; everything else is a non-centring helper and is dropped.
 KEEP = (
     "skill",
@@ -118,6 +127,9 @@ class ModelArrays:
     pl_len: jnp.ndarray
     q_rows: jnp.ndarray
     q_obs: jnp.ndarray
+    q_weight: jnp.ndarray
+    race_weight: jnp.ndarray
+    row_weight: jnp.ndarray
     row: dict[str, jnp.ndarray]
 
 
@@ -148,6 +160,9 @@ def model_arrays(design: PaceDesign) -> ModelArrays:
         pl_len=jnp.asarray(design.race_n_classified),
         q_rows=jnp.asarray(q_rows),
         q_obs=jnp.asarray(design.quali_gap[q_rows]),
+        q_weight=jnp.asarray(design.row_weight[q_rows]),
+        race_weight=jnp.asarray(design.race_weight),
+        row_weight=jnp.asarray(design.row_weight),
         row={
             "driver": jnp.asarray(design.driver),
             "driver_season": jnp.asarray(design.driver_season),
@@ -178,7 +193,7 @@ def pace_model(
     d, row = a.design, a.row
 
     tau_skill = numpyro.sample("tau_skill", dist.HalfNormal(0.3))
-    tau_season = numpyro.sample("tau_season", dist.HalfNormal(0.5))
+    tau_season = numpyro.sample("tau_season", dist.HalfNormal(1.0))
     tau_car = numpyro.sample("tau_car", dist.HalfNormal(0.5))
     tau_car_reg = numpyro.sample("tau_car_reg", dist.HalfNormal(1.5))
     tau_form = numpyro.sample("tau_form", dist.HalfNormal(0.1))
@@ -189,9 +204,13 @@ def pace_model(
     sigma_q = numpyro.sample("sigma_q", dist.HalfNormal(1.0))
 
     # Driver skill: a slow random walk across seasons plus a looser within-season deviation.
+    # The deviation's raw is a Student-t, not a Normal. Pooled over 394 driver-seasons that
+    # genuinely deviate very little, a Normal drove `tau_season` to 0.07 and a real breakout
+    # had nowhere to go. The heavy tail is the standard sparse construction: the bulk still
+    # shrinks to near zero, but one exceptional season is not forced down with it.
     with numpyro.plate("driver_seasons", d.n_driver_season):
         skill_raw = numpyro.sample("skill_raw", dist.Normal(0.0, 1.0))
-        season_raw = numpyro.sample("skill_season_raw", dist.Normal(0.0, 1.0))
+        season_raw = numpyro.sample("skill_season_raw", dist.StudentT(NU_SEASON, 0.0, 1.0))
     skill_scale = jnp.where(jnp.asarray(d.previous_driver_season < 0), FIRST_SKILL_SD, tau_skill)
     skill = numpyro.deterministic("skill", _walk(skill_raw * skill_scale, *a.skill_chain))
     skill_season = numpyro.deterministic("skill_season", season_raw * tau_season)
@@ -227,25 +246,31 @@ def pace_model(
         + track[row["driver"], row["track_type"]]
     )
 
+    # Each likelihood term is discounted by the age of its season (`design.row_weight`); the
+    # priors are not, so the hierarchy still pools over the whole history.
     mu_sorted = jnp.where(a.pl_mask, mu[a.pl_index], NEG)
-    numpyro.factor("finishing_order", plackett_luce_logp(mu_sorted, a.pl_len).sum())
+    order_logp = plackett_luce_logp(mu_sorted, a.pl_len)
+    numpyro.factor("finishing_order", (order_logp * a.race_weight).sum())
 
     # Qualifying: the same latent pace seen again, without the grid, wet or track terms.
     # The gap to pole has a long right tail — wet and red-flagged sessions, a lap abandoned
     # under yellows — so a Normal here spends `sigma_q` on the junk and leaves nothing for the
-    # pace. Student-t with a learned `nu_q` reads the tail as tail. `nu_q ~ Gamma(2, 0.1)` is
-    # the usual weakly-informative degrees-of-freedom prior: mass on the robust single digits,
-    # room to run to 50 and behave like the Normal if the tail turns out not to be there.
+    # pace. Student-t with a learned `nu_q` reads the tail as tail. The degrees of freedom are
+    # bounded below at `NU_Q_FLOOR`: `Gamma(2, 0.5)` has mean 4, so `nu_q` sits around 4 to 8,
+    # robust to the tail but with a finite variance and a unimodal per-race intercept.
     with numpyro.plate("races", d.n_race):
         alpha = numpyro.sample("alpha", dist.Normal(0.0, ALPHA_SD))
     mu_q = shared + car_pace
     loc = alpha[row["race"]] - kappa * mu_q
     if robust_quali:
-        nu_q = numpyro.sample("nu_q", dist.Gamma(2.0, 0.1))
+        nu_q = numpyro.deterministic(
+            "nu_q", NU_Q_FLOOR + numpyro.sample("nu_q_raw", dist.Gamma(2.0, 0.5))
+        )
         quali = dist.StudentT(nu_q, loc[a.q_rows], sigma_q)
     else:
         quali = dist.Normal(loc[a.q_rows], sigma_q)
-    numpyro.sample("quali", quali, obs=a.q_obs)
+    with numpyro.handlers.scale(scale=a.q_weight):
+        numpyro.sample("quali", quali, obs=a.q_obs)
 
     h0 = numpyro.sample("h0", dist.Normal(H0_LOC, H0_SD))
     h_wet = numpyro.sample("h_wet", dist.Normal(0.0, HAZARD_SD))
@@ -262,7 +287,8 @@ def pace_model(
         + h_circuit[row["circuit"]]
         + h_wet * row["is_wet"]
     )
-    numpyro.sample("retirement", dist.Bernoulli(logits=logits), obs=row["dnf"])
+    with numpyro.handlers.scale(scale=a.row_weight):
+        numpyro.sample("retirement", dist.Bernoulli(logits=logits), obs=row["dnf"])
 
 
 def _configure(device: str, chains: int) -> str:
@@ -352,6 +378,11 @@ def _draws(rng: np.random.Generator, scale: np.ndarray | float, size: int) -> np
     return rng.normal(0.0, 1.0, size=size) * np.asarray(scale)
 
 
+def _season_draws(rng: np.random.Generator, scale: np.ndarray, size: int) -> np.ndarray:
+    """The season deviation's own prior, so an unseen driver-season falls back to it exactly."""
+    return rng.standard_t(NU_SEASON, size=size) * np.asarray(scale)
+
+
 def predict_mu(
     posterior: Posterior,
     design: PaceDesign,
@@ -386,10 +417,10 @@ def predict_mu(
         elif driver_i >= 0:
             last = _last_driver_season(design, e.driver_id)
             skill = s["skill"][:, last] + _draws(rng, s["tau_skill"], n_draw)
-            skill_season = _draws(rng, s["tau_season"], n_draw)
+            skill_season = _season_draws(rng, s["tau_season"], n_draw)
         else:
             skill = _draws(rng, FIRST_SKILL_SD, n_draw)
-            skill_season = _draws(rng, s["tau_season"], n_draw)
+            skill_season = _season_draws(rng, s["tau_season"], n_draw)
 
         if cs_i >= 0:
             car = s["car"][:, cs_i]
