@@ -170,6 +170,10 @@ default to zero and are set by the tuner; `f1pred profile` prints the current nu
 
 ## Backtest results
 
+> **Superseded.** This section records the Phase 6 model. The shipped model is Phase 7a, whose
+> results are in [Phase 7a: concave grid and honest metrics](#phase-7a-concave-grid-and-honest-metrics)
+> below. Kept for comparison.
+
 Parameters were tuned by coordinate descent on 2015 to 2022 (`f1pred tune`) with the weather,
 track and driver-profile knobs in the grid, after the review fixes listed in the changelog. It
 chose `k_constructor = 48`, `sigma_team = 40`, `sigma_driver = 60`, `grid_bonus = 12`,
