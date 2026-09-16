@@ -57,6 +57,12 @@ class ModelParams:
     risk_noise_scale: float = 0.0
     risk_dnf_scale: float = 0.0
     form_scale: float = 0.0
+    # Bayesian pace model (Phase 7b). `pace_chains` also sets the CPU host device count, so
+    # four chains really do run in parallel; these defaults are one ~10 minute fit on an M2.
+    pace_num_warmup: int = 1000
+    pace_num_samples: int = 1000
+    pace_chains: int = 4
+    pace_device: str = "cpu"
 
     def replace(self, **changes: object) -> ModelParams:
         return dataclasses.replace(self, **changes)

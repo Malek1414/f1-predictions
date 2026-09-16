@@ -126,13 +126,13 @@ class PaceDesign:
     def meta(self) -> dict[str, Any]:
         """Everything a saved posterior needs to name its parameters again."""
         return {
-            "driver_ids": list(self.driver_ids),
-            "driver_season_keys": [list(k) for k in self.driver_season_keys],
-            "constructor_season_keys": [list(k) for k in self.constructor_season_keys],
-            "race_ids": list(self.race_ids),
-            "circuit_ids": list(self.circuit_ids),
-            "seasons": list(self.seasons),
-            "track_types": list(self.track_types),
+            "driver_ids": [str(d) for d in self.driver_ids],
+            "driver_season_keys": [[str(a), int(b)] for a, b in self.driver_season_keys],
+            "constructor_season_keys": [[str(a), int(b)] for a, b in self.constructor_season_keys],
+            "race_ids": [int(r) for r in self.race_ids],
+            "circuit_ids": [str(c) for c in self.circuit_ids],
+            "seasons": [int(s) for s in self.seasons],
+            "track_types": [str(t) for t in self.track_types],
         }
 
 
