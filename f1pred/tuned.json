@@ -1,13 +1,14 @@
 {
-  "_note": "tuned 2026-09-15 on 2015-2022, held out 2023-2025, train log loss 1.3095",
-  "k_constructor": 48.0,
-  "regress_constructor": 0.3,
-  "sigma_team": 40.0,
-  "sigma_driver": 60.0,
-  "grid_bonus": 12.0,
-  "shrink_wet": 16.0,
-  "shrink_track": 16.0,
+  "_note": "tuned 2026-09-16 on 2015-2023, held out 2024-2026, train log loss 1.2034",
+  "k_driver": 64.0,
+  "k_constructor": 64.0,
+  "teammate_weight": 3.0,
+  "regress_driver": 0.2,
+  "regress_constructor": 0.1,
+  "grid_bonus": 25.0,
+  "shrink_wet": 32.0,
+  "shrink_track": 32.0,
   "wet_dnf_factor": 1.0,
-  "aggression_scale": 5.0,
+  "shrink_profile": 2.0,
   "risk_dnf_scale": 0.25
 }

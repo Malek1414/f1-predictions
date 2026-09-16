@@ -16,22 +16,24 @@ from f1pred.ratings.profile import profile_features, profile_lookup
 from f1pred.sim.dnf import dnf_cache_for_races
 
 SEARCH_SPACE: dict[str, list[float]] = {
-    "k_driver": [16.0, 24.0, 32.0],
-    "k_constructor": [24.0, 32.0, 48.0],
-    "sigma_team": [40.0, 60.0, 90.0],
-    "sigma_driver": [60.0, 80.0, 110.0],
-    "grid_bonus": [4.0, 8.0, 12.0],
-    "regress_constructor": [0.3, 0.4, 0.6],
-    # Phase 4 (spec 8.1)
-    "shrink_wet": [4.0, 8.0, 16.0],
-    "shrink_track": [4.0, 8.0, 16.0],
-    "wet_noise_factor": [1.0, 1.5, 2.0],
-    "wet_dnf_factor": [1.0, 1.5, 2.0],
-    # Phase 5 (spec 6.5)
+    # Widened after the first tune pinned several knobs at the edge of the old lists.
+    "k_driver": [24.0, 32.0, 48.0, 64.0, 96.0],
+    "k_constructor": [32.0, 48.0, 64.0, 96.0, 128.0],
+    "teammate_weight": [1.0, 2.0, 3.0],
+    "regress_driver": [0.05, 0.1, 0.2],
+    "regress_constructor": [0.1, 0.2, 0.3, 0.4],
+    "sigma_team": [15.0, 25.0, 40.0, 60.0],
+    "sigma_driver": [25.0, 40.0, 60.0, 80.0],
+    "grid_bonus": [8.0, 12.0, 16.0, 20.0, 25.0, 30.0, 40.0],
+    "shrink_wet": [8.0, 16.0, 32.0],
+    "shrink_track": [8.0, 16.0, 32.0],
+    "wet_noise_factor": [1.0, 1.5],
+    "wet_dnf_factor": [1.0, 1.5],
     "aggression_scale": [0.0, 5.0, 10.0, 20.0],
-    "risk_noise_scale": [0.0, 0.25, 0.5],
+    "risk_noise_scale": [0.0, 0.25],
     "risk_dnf_scale": [0.0, 0.25, 0.5],
-    "form_scale": [0.0, 5.0, 10.0],
+    "form_scale": [0.0, 10.0, 20.0, 40.0],
+    "shrink_profile": [2.0, 5.0, 10.0],
 }
 
 
