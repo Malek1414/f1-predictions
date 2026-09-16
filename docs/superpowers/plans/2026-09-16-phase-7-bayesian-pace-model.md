@@ -324,6 +324,15 @@ Write `_synthetic_design` in the test file: it builds a driver-race DataFrame wi
 
 ## Sub-phase 7c: walk-forward evaluation, Spark, comparison
 
+> **Tabled until the DGX Spark is reachable** (decided 2026-09-16). Task 9's *code* ships with 7b
+> and is tested with `fit` monkeypatched; the full 62-fit run does not. Measured on the M2 (8 cores,
+> 24 GB): one fit is about 5 minutes on a single chain and 9 minutes on 4 parallel chains, so the
+> walk-forward run is 4 to 9 hours here versus under an hour on the Spark. The workload is memory
+> and latency bound, not FLOP bound: 1.11 MFLOP against 3.74 MB of traffic per gradient evaluation,
+> so the Spark's value is running chains and fits side by side, not making one fit faster.
+> To unblock: a `Host spark` entry in `~/.ssh/config`, then `make spark-check`.
+
+
 ### Task 9: Walk-forward posterior backtest
 
 **Files:** `f1pred/backtest/walkforward.py`, `f1pred/cli.py`, `tests/test_walkforward.py`
