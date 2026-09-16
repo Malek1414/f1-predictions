@@ -46,8 +46,10 @@ def objective(
     n_runs: int = 2000,
     seed: int = 0,
     dnf_cache: dict | None = None,
+    metric: str = "model_logloss",
 ) -> float:
-    """Mean winner log loss over the training seasons for these params."""
+    """Mean of `metric` (a race-score column, default winner log loss) over the training
+    seasons for these params. Lower is better for every column the tuner accepts."""
     history, _ = replay(table, params)
     # The profile lookup depends on `history` (and so on K), so it is rebuilt per candidate.
     profiles = (
@@ -63,7 +65,7 @@ def objective(
         dnf_cache=dnf_cache,
         profiles=profiles,
     )
-    return float(result.races["model_logloss"].mean())
+    return float(result.races[metric].mean())
 
 
 def coordinate_descent(
@@ -75,13 +77,14 @@ def coordinate_descent(
     n_runs: int = 2000,
     seed: int = 0,
     log: Callable[..., None] = print,
+    metric: str = "model_logloss",
 ) -> tuple[ModelParams, float]:
     """Try each candidate value of one parameter at a time, keep the best, repeat."""
     train = list(train_seasons)
     race_ids = table[(~table.is_sprint) & (table.season.isin(train))].race_id.unique()
     dnf_cache = dnf_cache_for_races(table, race_ids, base)
     best = base
-    best_score = objective(table, best, train, n_runs, seed, dnf_cache)
+    best_score = objective(table, best, train, n_runs, seed, dnf_cache, metric)
     log(f"start: {best_score:.4f}")
     for p in range(passes):
         for name, candidates in space.items():
@@ -89,7 +92,7 @@ def coordinate_descent(
                 if getattr(best, name) == value:
                     continue
                 trial = best.replace(**{name: value})
-                score = objective(table, trial, train, n_runs, seed, dnf_cache)
+                score = objective(table, trial, train, n_runs, seed, dnf_cache, metric)
                 log(f"pass {p + 1} {name}={value}: {score:.4f}")
                 if score < best_score:
                     best, best_score = trial, score

@@ -13,6 +13,8 @@ from rich.console import Console
 from rich.table import Table
 
 from f1pred import tune as tune_mod
+from f1pred.backtest.bootstrap import bootstrap_intervals
+from f1pred.backtest.rolling import INTERVAL_METRICS, rolling_origin
 from f1pred.backtest.run import ablation_backtest, run_backtest
 from f1pred.config import (
     DEFAULT_CACHE_DIR,
@@ -34,8 +36,10 @@ from f1pred.report.tables import (
     backtest_table,
     distribution_table,
     forecast_table,
+    interval_table,
     profile_table,
     ratings_table,
+    rolling_table,
     title_tables,
 )
 from f1pred.sim.race import simulate_race
@@ -225,12 +229,31 @@ def backtest(
         help="Use each race's observed rainfall instead of the pre-race historical wet rate "
         "(an upper bound on what a forecast could deliver)",
     ),
+    bootstrap: int = typer.Option(
+        0,
+        "--bootstrap",
+        min=0,
+        help="Resample races this many times for 90% intervals on the season means",
+    ),
+    rolling: str | None = typer.Option(
+        None,
+        "--rolling",
+        help="Rolling-origin folds, e.g. 2024-2026: each fold is scored with parameters "
+        "that never saw it (ratings are replayed per fold; --seasons is ignored)",
+    ),
+    tune: bool = typer.Option(
+        False, "--tune", help="With --rolling: re-tune on the seasons before each fold"
+    ),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
 ) -> None:
     """Score the model on past seasons against the pole-wins and uniform baselines."""
     params = load_params()
     _, table = _load_cached(cache_dir)
+    out.mkdir(parents=True, exist_ok=True)
+    if rolling is not None:
+        _rolling_backtest(table, params, _parse_seasons(rolling), tune, runs, seed, bootstrap, out)
+        return
     history, _ = _load_ratings(cache_dir)
     season_list = _parse_seasons(seasons)
     rain_mode = "observed" if observed_rain else "historical"
@@ -244,9 +267,12 @@ def backtest(
         f"ECE win {result.ece_win:.4f}, ECE podium {result.ece_podium:.4f}, "
         f"sharpness {result.sharpness:.3f} over {len(result.races)} races"
     )
-    out.mkdir(parents=True, exist_ok=True)
     result.races.to_csv(out / "backtest_races.csv", index=False)
     result.seasons.to_csv(out / "backtest_seasons.csv", index=False)
+    if bootstrap > 0:
+        ci = bootstrap_intervals(result.races, INTERVAL_METRICS, R=bootstrap, seed=seed)
+        console.print(interval_table(ci, f"{len(result.races)} races, R={bootstrap}"))
+        ci.to_csv(out / "backtest_intervals.csv", index=False)
     console.print(
         f"Calibration chart: {calibration_chart(result.calibration, out / 'calibration.png')}"
     )
@@ -263,6 +289,34 @@ def backtest(
         console.print(_ablation_table(abl))
         abl.to_csv(out / "ablation.csv", index=False)
         console.print(f"Ablation table: {out / 'ablation.csv'}")
+
+
+def _rolling_backtest(
+    table: pd.DataFrame,
+    params,
+    folds: list[int],
+    tune: bool,
+    runs: int,
+    seed: int,
+    bootstrap: int,
+    out: Path,
+) -> None:
+    tune_fn = None
+    if tune:
+
+        def tune_fn(tbl: pd.DataFrame, train: list[int]):
+            console.print(f"[bold]Tuning on {train[0]}-{train[-1]}[/bold]")
+            best, _ = tune_mod.coordinate_descent(
+                tbl, DEFAULT_PARAMS, train, n_runs=runs, seed=seed, log=lambda *_: None
+            )
+            return best
+
+    folds_df = rolling_origin(
+        table, params, folds, tune_fn, n_runs=runs, seed=seed, R=bootstrap if bootstrap else 1000
+    )
+    console.print(rolling_table(folds_df))
+    folds_df.to_csv(out / "rolling.csv", index=False)
+    console.print(f"Fold table: {out / 'rolling.csv'}")
 
 
 def _rain_line(probability: float, source: str) -> str:

@@ -119,6 +119,37 @@ def distribution_table(seasons: pd.DataFrame) -> Table:
     return table
 
 
+def interval_table(intervals: pd.DataFrame, note: str = "") -> Table:
+    """Bootstrap 90% intervals, one row per metric (`metric, mean, lo, hi`)."""
+    title = "Bootstrap 90% intervals" + (f" ({note})" if note else "")
+    table = Table(title=title)
+    table.add_column("metric")
+    for label in ("mean", "lo", "hi"):
+        table.add_column(label, justify="right")
+    for r in intervals.itertuples(index=False):
+        table.add_row(r.metric, f"{r.mean:.4f}", f"{r.lo:.4f}", f"{r.hi:.4f}")
+    return table
+
+
+def rolling_table(folds: pd.DataFrame) -> Table:
+    """One row per rolling-origin fold: model vs pole log loss and RPS with 90% intervals."""
+    table = Table(title="Rolling-origin folds (tuned on earlier seasons only; 90% intervals)")
+    labels = ("Fold", "Train", "Races", "LogLoss model", "LogLoss pole", "RPS model", "RPS pole")
+    for label in labels:
+        table.add_column(label, justify="left" if label == "Train" else "right")
+    for r in folds.itertuples(index=False):
+        table.add_row(
+            str(int(r.season)),
+            str(r.train_seasons),
+            str(int(r.n_races)),
+            f"{r.model_logloss:.2f} [{r.lo:.2f}, {r.hi:.2f}]",
+            f"{r.pole_logloss:.2f} [{r.pole_lo:.2f}, {r.pole_hi:.2f}]",
+            f"{r.model_rps:.3f} [{r.rps_lo:.3f}, {r.rps_hi:.3f}]",
+            f"{r.pole_rps:.3f} [{r.pole_rps_lo:.3f}, {r.pole_rps_hi:.3f}]",
+        )
+    return table
+
+
 def title_tables(
     forecast: SeasonForecast, names: Mapping[str, str], top: int = 10
 ) -> tuple[Table, Table]:

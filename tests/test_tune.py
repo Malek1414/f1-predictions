@@ -13,6 +13,12 @@ def test_objective_is_finite_and_params_matter(driver_race):
     assert a != b
 
 
+def test_objective_can_score_rps(driver_race):
+    ll = objective(driver_race, DEFAULT_PARAMS, [2024], n_runs=100, seed=0)
+    r = objective(driver_race, DEFAULT_PARAMS, [2024], n_runs=100, seed=0, metric="model_rps")
+    assert 0 < r < 1 and r != ll
+
+
 def test_coordinate_descent_small_space(driver_race):
     space = {"grid_bonus": [0.0, 8.0], "sigma_team": [60.0]}
     best, score = coordinate_descent(

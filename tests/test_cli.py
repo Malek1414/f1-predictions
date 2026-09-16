@@ -297,6 +297,42 @@ def test_backtest_observed_rain_flag(cache_dir, tmp_path):
     assert set(pd.read_csv(tmp_path / "obs" / "ablation.csv").rain_mode) == {"observed"}
 
 
+def test_backtest_bootstrap_flag(cache_dir, tmp_path):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    common = ["--seasons", "2024", "--runs", "50", "--cache-dir", str(cache_dir)]
+    r = runner.invoke(app, ["backtest", *common, "--bootstrap", "50", "--out", str(tmp_path)])
+    assert r.exit_code == 0, r.output
+    assert "model_logloss" in r.output and "model_rps" in r.output
+    ci = pd.read_csv(tmp_path / "backtest_intervals.csv")
+    assert list(ci.columns) == ["metric", "mean", "lo", "hi"]
+    assert (ci.lo <= ci["mean"]).all() and (ci["mean"] <= ci.hi).all()
+
+
+def test_backtest_rolling_flag(cache_dir, tmp_path):
+    # Rolling evaluation replays its own ratings, so it needs no `ratings build`.
+    r = runner.invoke(
+        app,
+        [
+            "backtest",
+            "--rolling",
+            "2024",
+            "--runs",
+            "50",
+            "--bootstrap",
+            "50",
+            "--cache-dir",
+            str(cache_dir),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    folds = pd.read_csv(tmp_path / "rolling.csv")
+    # A single training season round-trips through CSV as an int.
+    assert list(folds.season) == [2024] and str(folds.train_seasons.iloc[0]) == "2023"
+    assert {"lo", "hi", "model_rps", "pole_logloss"} <= set(folds.columns)
+
+
 def test_profile_command(cache_dir):
     runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
     r = runner.invoke(app, ["profile", "--cache-dir", str(cache_dir)])
