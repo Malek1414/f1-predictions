@@ -115,3 +115,38 @@ class Posterior:
         table = table[table["param"].isin(wanted)].copy()
         table["name"] = [p.split("[", 1)[1].split(",")[0] for p in table["param"]]
         return table.sort_values("mean", ascending=False).reset_index(drop=True)
+
+    def seasons(self) -> list[int]:
+        return sorted({int(s) for _, s in self.design_meta["constructor_season_keys"]})
+
+    def driver_table(self, season: int) -> pd.DataFrame:
+        """Career skill, this season's deviation and their sum, per driver, with 90% intervals.
+
+        The total is combined draw by draw, so its interval accounts for the two terms trading
+        off against each other rather than adding their widths.
+        """
+        keys = self.design_meta["driver_season_keys"]
+        idx = [i for i, (_, s) in enumerate(keys) if int(s) == season]
+        skill = self.samples["skill"][:, idx]
+        deviation = self.samples["skill_season"][:, idx]
+        total = skill + deviation
+        rows = [
+            {
+                "driver_id": keys[i][0],
+                "skill": float(skill[:, j].mean()),
+                "season": float(deviation[:, j].mean()),
+                "season_lo": float(np.percentile(deviation[:, j], 5)),
+                "season_hi": float(np.percentile(deviation[:, j], 95)),
+                "total": float(total[:, j].mean()),
+                "lo": float(np.percentile(total[:, j], 5)),
+                "hi": float(np.percentile(total[:, j], 95)),
+            }
+            for j, i in enumerate(idx)
+        ]
+        table = pd.DataFrame(rows)
+        return table.sort_values("total", ascending=False).reset_index(drop=True)
+
+    def car_table(self, season: int) -> pd.DataFrame:
+        """Constructor season pace with a 90% interval, fastest first."""
+        table = self.season_table("car", season).rename(columns={"name": "constructor_id"})
+        return table[["constructor_id", "mean", "lo", "hi", "r_hat"]]

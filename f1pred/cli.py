@@ -29,6 +29,9 @@ from f1pred.data.laps import download_lap1
 from f1pred.data.qualifying import qualifying_gaps
 from f1pred.data.track_types import load_track_types, track_type_for
 from f1pred.data.weather import build_weather_table, circuit_wet_rate
+from f1pred.pace.bridge import forecast_from_posterior, load_posterior, posterior_path
+from f1pred.pace.design import build_design
+from f1pred.pace.model import fit as pace_fit
 from f1pred.predict import UnknownRaceError, build_prediction_inputs, resolve_race
 from f1pred.ratings.history import RatingState, replay
 from f1pred.ratings.profile import latest_profiles
@@ -38,6 +41,9 @@ from f1pred.report.tables import (
     distribution_table,
     forecast_table,
     interval_table,
+    pace_car_table,
+    pace_diagnostics_line,
+    pace_driver_table,
     profile_table,
     ratings_table,
     rolling_table,
@@ -58,8 +64,10 @@ STATE_FILE = "ratings_state.json"
 app = typer.Typer(help="F1 race predictions with Elo ratings and Monte Carlo simulation.")
 data_app = typer.Typer(help="Download and cache data.")
 ratings_app = typer.Typer(help="Build ratings.")
+pace_app = typer.Typer(help="Fit and inspect the Bayesian pace model (docs/pace-model.md).")
 app.add_typer(data_app, name="data")
 app.add_typer(ratings_app, name="ratings")
+app.add_typer(pace_app, name="pace")
 console = Console()
 
 CacheDir = typer.Option(DEFAULT_CACHE_DIR, "--cache-dir", help="Parquet cache directory")
@@ -170,6 +178,70 @@ def ratings_build(cache_dir: Path = CacheDir) -> None:
     console.print(cons)
 
 
+@pace_app.command("fit")
+def pace_fit_command(
+    device: str = typer.Option(None, "--device", help="cpu or gpu (default: config)"),
+    warmup: int = typer.Option(None, "--warmup"),
+    samples: int = typer.Option(None, "--samples"),
+    chains: int = typer.Option(None, "--chains"),
+    cutoff: str = typer.Option(
+        None, "--cutoff", help="Only use races strictly before this date, e.g. 2026-07-01"
+    ),
+    seed: int = typer.Option(0, "--seed"),
+    cache_dir: Path = CacheDir,
+) -> None:
+    """Fit the Bayesian pace model and write the posterior to the cache."""
+    params = load_params()
+    _, table = _load_cached(cache_dir)
+    before = pd.Timestamp(cutoff) if cutoff else None
+    design = build_design(table, before_date=before, params=params)
+    console.print(
+        f"{design.n_row:,} driver-races, {design.n_race} races, "
+        f"{design.seasons[0]}-{design.seasons[-1]}, {design.n_driver} drivers"
+    )
+    posterior = pace_fit(
+        design,
+        params,
+        num_warmup=warmup,
+        num_samples=samples,
+        chains=chains,
+        seed=seed,
+        device=device,
+    )
+    posterior.diagnostics["cutoff"] = cutoff
+    name = f"{cutoff}.npz" if cutoff else "latest.npz"
+    path = posterior.save(posterior_path(cache_dir, name))
+    console.print(pace_diagnostics_line(posterior.diagnostics))
+    season = design.seasons[-1]
+    names = dict(zip(table.driver_id, table.driver_name, strict=True))
+    console.print(pace_driver_table(posterior.driver_table(season), names, season))
+    console.print(pace_car_table(posterior.car_table(season), season))
+    console.print(f"Posterior: {path}")
+
+
+@pace_app.command("summary")
+def pace_summary_command(
+    season: int = typer.Option(None, "--season", help="Default: the latest season in the fit"),
+    top: int = typer.Option(15, "--top"),
+    name: str = typer.Option("latest.npz", "--posterior", help="File inside posteriors/"),
+    cache_dir: Path = CacheDir,
+) -> None:
+    """Driver skill and car pace for one season, with 90% credible intervals."""
+    _, table = _load_cached(cache_dir)
+    try:
+        posterior = load_posterior(cache_dir, name)
+    except FileNotFoundError as exc:
+        _fail(str(exc), 1)
+    seasons = posterior.seasons()
+    season = seasons[-1] if season is None else season
+    if season not in seasons:
+        _fail(f"The posterior covers {seasons[0]}-{seasons[-1]}, not {season}.", 2)
+    names = dict(zip(table.driver_id, table.driver_name, strict=True))
+    console.print(pace_diagnostics_line(posterior.diagnostics))
+    console.print(pace_driver_table(posterior.driver_table(season), names, season, top=top))
+    console.print(pace_car_table(posterior.car_table(season), season))
+
+
 @app.command()
 def predict(
     season: int = typer.Option(..., "--season"),
@@ -181,11 +253,17 @@ def predict(
     rain: float | None = typer.Option(
         None, "--rain", min=0.0, max=1.0, help="Override the rain probability (0 to 1)"
     ),
+    model: str = typer.Option(
+        None, "--model", help="elo (Phase 6 ratings) or bayes (the posterior pace model)"
+    ),
     cache_dir: Path = CacheDir,
     out: Path = OutDir,
 ) -> None:
     """Win, podium and points probabilities for one race."""
     params = load_params()
+    model = model or params.model
+    if model not in ("elo", "bayes"):
+        _fail(f"Unknown --model {model!r}; use elo or bayes.", 2)
     raw, table = _load_cached(cache_dir)
     history, state = _load_ratings(cache_dir)
     try:
@@ -201,21 +279,40 @@ def predict(
     if inputs.note:
         console.print(f"[yellow]{inputs.note}[/yellow]")
     console.print(_rain_line(inputs.rain_probability, inputs.rain_source))
-    forecast = simulate_race(
-        inputs.entrants,
-        params,
-        n_runs=runs,
-        seed=seed,
-        use_grid=inputs.use_grid,
-        rain_probability=inputs.rain_probability,
-    )
+    if model == "bayes":
+        forecast = _bayes_forecast(cache_dir, table, inputs, params, runs, seed)
+    else:
+        forecast = simulate_race(
+            inputs.entrants,
+            params,
+            n_runs=runs,
+            seed=seed,
+            use_grid=inputs.use_grid,
+            rain_probability=inputs.rain_probability,
+        )
     low = {e.driver_id for e in inputs.entrants if e.low_confidence}
-    title = f"{ref.name} {ref.season} (round {ref.round})"
+    title = f"{ref.name} {ref.season} (round {ref.round}, {model})"
     console.print(forecast_table(forecast, inputs.names, low, title))
     stem = f"{ref.season}-{ref.round:02d}"
     win_path = win_chart(forecast, inputs.names, title, out / f"{stem}-win.png")
     pos_path = position_heatmap(forecast, inputs.names, title, out / f"{stem}-positions.png")
     console.print(f"Charts: {win_path}, {pos_path}")
+
+
+def _bayes_forecast(cache_dir: Path, table: pd.DataFrame, inputs, params, runs: int, seed: int):
+    """Simulate from the saved posterior, rebuilt on the same design the fit used."""
+    try:
+        posterior = load_posterior(cache_dir)
+    except FileNotFoundError as exc:
+        _fail(str(exc), 1)
+    cutoff = posterior.diagnostics.get("cutoff")
+    design = build_design(
+        table, before_date=pd.Timestamp(cutoff) if cutoff else None, params=params
+    )
+    try:
+        return forecast_from_posterior(posterior, design, inputs, params, n_runs=runs, seed=seed)
+    except Exception as exc:
+        _fail(str(exc), 1)
 
 
 @app.command()

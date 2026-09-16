@@ -355,3 +355,98 @@ def test_data_update_downloads_lap1(tmp_path, monkeypatch):
     assert r.exit_code == 0, r.output
     assert (tmp_path / "lap1.parquet").exists()
     assert pd.read_parquet(tmp_path / "driver_race.parquet").lap1_position.notna().any()
+
+
+def test_pace_fit_then_summary_and_predict_bayes(cache_dir, tmp_path):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    r = runner.invoke(
+        app,
+        [
+            "pace",
+            "fit",
+            "--warmup",
+            "20",
+            "--samples",
+            "20",
+            "--chains",
+            "1",
+            "--cache-dir",
+            str(cache_dir),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert (cache_dir / "posteriors" / "latest.npz").exists()
+    assert (cache_dir / "posteriors" / "latest.json").exists()
+    assert "divergences" in r.output and "car pace" in r.output
+
+    r = runner.invoke(app, ["pace", "summary", "--cache-dir", str(cache_dir)])
+    assert r.exit_code == 0, r.output
+    assert "2024 driver pace" in r.output and "Max Verstappen" in r.output
+
+    r = runner.invoke(
+        app,
+        [
+            "predict",
+            "--season",
+            "2024",
+            "--round",
+            "8",
+            "--model",
+            "bayes",
+            "--runs",
+            "300",
+            "--cache-dir",
+            str(cache_dir),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 0, r.output
+    assert "bayes" in r.output and "Monaco Grand Prix" in r.output
+
+
+def test_predict_bayes_without_a_posterior_exits_1(cache_dir, tmp_path):
+    empty = tmp_path / "cache"
+    empty.mkdir()
+    for p in cache_dir.glob("*.parquet"):
+        (empty / p.name).write_bytes(p.read_bytes())
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(empty)])
+    r = runner.invoke(
+        app,
+        [
+            "predict",
+            "--season",
+            "2024",
+            "--round",
+            "1",
+            "--model",
+            "bayes",
+            "--runs",
+            "50",
+            "--cache-dir",
+            str(empty),
+            "--out",
+            str(tmp_path),
+        ],
+    )
+    assert r.exit_code == 1
+    assert "f1pred pace fit" in r.output
+
+
+def test_predict_rejects_an_unknown_model(cache_dir):
+    runner.invoke(app, ["ratings", "build", "--cache-dir", str(cache_dir)])
+    r = runner.invoke(
+        app,
+        [
+            "predict",
+            "--season",
+            "2024",
+            "--round",
+            "1",
+            "--model",
+            "wat",
+            "--cache-dir",
+            str(cache_dir),
+        ],
+    )
+    assert r.exit_code == 2 and "elo or bayes" in r.output

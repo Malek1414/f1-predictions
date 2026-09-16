@@ -337,6 +337,8 @@ def predict_mu(
 
     An entrant the design never saw falls back to the model's own priors, drawn once per
     posterior sample, so an unknown driver or a brand-new team is wide rather than average.
+    `grid=None` takes each entrant's own slot; a dict overrides it, and `{}` drops the grid
+    term altogether (the no-qualifying case).
     """
     s = posterior.samples
     n_draw = posterior.n_samples
@@ -381,7 +383,7 @@ def predict_mu(
             if driver_i >= 0 and track_index >= 0
             else _draws(rng, s["tau_track"], n_draw)
         )
-        slot = (grid or {}).get(e.driver_id, e.grid)
+        slot = e.grid if grid is None else grid.get(e.driver_id)
         grid_g = 0.0 if slot is None else 1.0 / float(max(int(slot), 1)) ** GRID_SHAPE
         mu[:, i] = (
             skill

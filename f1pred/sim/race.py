@@ -85,23 +85,32 @@ def simulate_positions(
     rng: np.random.Generator,
     use_grid: bool = True,
     rain_probability: float = 0.0,
+    strength_samples: np.ndarray | None = None,
+    p_dnf_samples: np.ndarray | None = None,
 ) -> tuple[np.ndarray, bool]:
     """One finishing order per run. Returns (positions of shape (n_runs, n), used_grid).
 
     Spec 6.7: each run first draws wet ~ Bernoulli(rain_probability). Wet runs use the wet
     strength, scale both noise terms by wet_noise_factor and DNF odds by wet_dnf_factor.
     With rain_probability == 0 the draw is skipped so earlier seeds reproduce exactly.
+
+    Phase 7b: with `strength_samples` of shape (S, n) from the Bayesian pace model, run `i`
+    uses row `i % S` — one posterior draw per run, so model uncertainty widens the odds. The
+    grid, team correlation and the wet and track effects are already inside those paces, so the
+    grid term is skipped, `sigma_team` is forced to 0, the rain draw is skipped, and the driver
+    noise becomes `pace_scale * pi / sqrt(6)`, the Normal matching the Plackett-Luce Gumbel.
     """
     n = len(entrants)
     strength = np.array([e.strength for e in entrants], dtype=float)
     p_dnf = np.array([e.p_dnf for e in entrants], dtype=float)
     used_grid = use_grid and all(e.grid is not None for e in entrants)
+    from_posterior = strength_samples is not None
 
     # Spec 6.5: aggression and form as pace, risk as wider driver noise and more DNFs. No extra
     # RNG draws, and every adjustment is an exact no-op while its scale is 0.
     profile_pace = np.zeros(n)
     risk_noise = np.ones(n)
-    if params.use_profile:
+    if params.use_profile and not from_posterior:
         aggression = np.array([e.aggression for e in entrants], dtype=float)
         risk = np.array([e.risk for e in entrants], dtype=float)
         form = np.array([e.form for e in entrants], dtype=float)
@@ -111,26 +120,38 @@ def simulate_positions(
         # Clip only where the multiplier bites so a certain (or impossible) DNF stays exact.
         p_dnf = np.where(risk_dnf != 1.0, np.clip(p_dnf * risk_dnf, 0.01, 0.95), p_dnf)
 
-    if rain_probability > 0.0:
+    if rain_probability > 0.0 and not from_posterior:
         wet = rng.random(n_runs) < rain_probability
     else:
         wet = np.zeros(n_runs, dtype=bool)
-    strength_wet = np.array([e.wet_strength for e in entrants], dtype=float)
-    strength_run = np.where(wet[:, None], strength_wet[None, :], strength[None, :])
     noise_scale = np.where(wet, params.wet_noise_factor, 1.0)[:, None]
 
-    teams = sorted({e.constructor_id for e in entrants})
-    team_idx = np.array([teams.index(e.constructor_id) for e in entrants])
-    team_noise = rng.normal(0.0, params.sigma_team, size=(n_runs, len(teams)))[:, team_idx]
-
-    if used_grid:
-        grid = np.array([e.grid for e in entrants], dtype=float)
-        grid_pace = grid_term(grid, n, params)
-        sigma_driver = params.sigma_driver
-    else:
+    if from_posterior:
+        rows = np.arange(n_runs) % np.asarray(strength_samples).shape[0]
+        strength_run = np.asarray(strength_samples, dtype=float)[rows]
+        p_dnf_base = (
+            np.asarray(p_dnf_samples, dtype=float)[rows]
+            if p_dnf_samples is not None
+            else np.repeat(p_dnf[None, :], n_runs, axis=0)
+        )
+        team_noise = np.zeros((n_runs, n))
         grid_pace = np.zeros(n)
-        # An unknown grid slot is a uniform draw over 1..n; fold its spread into driver noise.
-        sigma_driver = float(np.sqrt(params.sigma_driver**2 + no_grid_sigma(n, params) ** 2))
+        sigma_driver = params.pace_scale * np.pi / np.sqrt(6.0)
+    else:
+        strength_wet = np.array([e.wet_strength for e in entrants], dtype=float)
+        strength_run = np.where(wet[:, None], strength_wet[None, :], strength[None, :])
+        p_dnf_base = np.repeat(p_dnf[None, :], n_runs, axis=0)
+        teams = sorted({e.constructor_id for e in entrants})
+        team_idx = np.array([teams.index(e.constructor_id) for e in entrants])
+        team_noise = rng.normal(0.0, params.sigma_team, size=(n_runs, len(teams)))[:, team_idx]
+        if used_grid:
+            grid = np.array([e.grid for e in entrants], dtype=float)
+            grid_pace = grid_term(grid, n, params)
+            sigma_driver = params.sigma_driver
+        else:
+            grid_pace = np.zeros(n)
+            # An unknown grid slot is a uniform draw over 1..n; fold its spread into the noise.
+            sigma_driver = float(np.sqrt(params.sigma_driver**2 + no_grid_sigma(n, params) ** 2))
     driver_noise = rng.normal(0.0, sigma_driver, size=(n_runs, n)) * risk_noise[None, :]
 
     performance = (
@@ -142,7 +163,7 @@ def simulate_positions(
     )
     # Clip only the wet branch so a dry run keeps p_dnf exactly (a certain DNF stays certain).
     p_dnf_wet = np.clip(p_dnf * params.wet_dnf_factor, 0.0, 0.95)
-    p_dnf_run = np.where(wet[:, None], p_dnf_wet[None, :], p_dnf[None, :])
+    p_dnf_run = np.where(wet[:, None], p_dnf_wet[None, :], p_dnf_base)
     dnf = rng.random((n_runs, n)) < p_dnf_run
     key = np.where(dnf, DNF_KEY + rng.random((n_runs, n)), performance)
 
@@ -160,11 +181,20 @@ def simulate_race(
     use_grid: bool = True,
     rain_probability: float = 0.0,
     keep_positions: bool = False,
+    strength_samples: np.ndarray | None = None,
+    p_dnf_samples: np.ndarray | None = None,
 ) -> RaceForecast:
     rng = np.random.default_rng(seed)
     n = len(entrants)
     positions, used_grid = simulate_positions(
-        entrants, params, n_runs, rng, use_grid, rain_probability=rain_probability
+        entrants,
+        params,
+        n_runs,
+        rng,
+        use_grid,
+        rain_probability=rain_probability,
+        strength_samples=strength_samples,
+        p_dnf_samples=p_dnf_samples,
     )
     position_matrix = (
         np.stack([np.bincount(positions[:, i] - 1, minlength=n) for i in range(n)]).astype(float)

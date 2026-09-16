@@ -218,3 +218,50 @@ def profile_table(
             names.get(d, d), f"{p.aggression:+.2f}", f"{p.risk:+.2f}", f"{p.form:+.2f}", str(p.n)
         )
     return table
+
+
+def pace_driver_table(
+    drivers: pd.DataFrame, names: Mapping[str, str], season: int, top: int = 15
+) -> Table:
+    """Career skill, this season's deviation and their sum, in pace units, best first."""
+    table = Table(title=f"{season} driver pace (posterior mean, 90% interval, pace units)")
+    for label in ("#", "Driver", "Skill", "Season", "Total"):
+        table.add_column(label, justify="left" if label in ("#", "Driver") else "right")
+    for i, r in enumerate(drivers.head(top).itertuples(index=False), start=1):
+        table.add_row(
+            str(i),
+            names.get(r.driver_id, r.driver_id),
+            f"{r.skill:+.2f}",
+            f"{r.season:+.2f} [{r.season_lo:+.2f}, {r.season_hi:+.2f}]",
+            f"{r.total:+.2f} [{r.lo:+.2f}, {r.hi:+.2f}]",
+        )
+    return table
+
+
+def pace_car_table(cars: pd.DataFrame, season: int) -> Table:
+    """Constructor season pace with its 90% interval, fastest car first."""
+    table = Table(title=f"{season} car pace (posterior mean, 90% interval, pace units)")
+    for label in ("#", "Constructor", "Pace", "r_hat"):
+        table.add_column(label, justify="left" if label in ("#", "Constructor") else "right")
+    for i, r in enumerate(cars.itertuples(index=False), start=1):
+        table.add_row(
+            str(i),
+            r.constructor_id,
+            f"{r.mean:+.2f} [{r.lo:+.2f}, {r.hi:+.2f}]",
+            "-" if pd.isna(r.r_hat) else f"{r.r_hat:.3f}",
+        )
+    return table
+
+
+def pace_diagnostics_line(diagnostics: Mapping[str, object]) -> str:
+    """One line a human can act on: sampler health first, then how long it took."""
+    divergences = int(diagnostics.get("divergences", 0))
+    draws = int(diagnostics.get("num_samples", 0)) or 1
+    r_hat = float(diagnostics.get("max_r_hat", float("nan")))
+    ess = float(diagnostics.get("min_ess", float("nan")))
+    return (
+        f"{draws} draws from {diagnostics.get('num_chains')} chain(s) on "
+        f"{diagnostics.get('device')}; max r_hat {r_hat:.3f}, min ESS {ess:.0f}, "
+        f"{divergences} divergences ({100 * divergences / draws:.2f}%), "
+        f"{diagnostics.get('seconds')}s"
+    )

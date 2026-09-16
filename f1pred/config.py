@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import dataclasses
 import json
+import math
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -63,6 +64,10 @@ class ModelParams:
     pace_num_samples: int = 1000
     pace_chains: int = 4
     pace_device: str = "cpu"
+    # "elo" (phases 1 to 6) or "bayes" (the posterior pace model). One pace unit is worth
+    # `pace_scale` rating points, so the existing reports keep their Elo semantics.
+    model: str = "elo"
+    pace_scale: float = 400.0 / math.log(10.0)
 
     def replace(self, **changes: object) -> ModelParams:
         return dataclasses.replace(self, **changes)
