@@ -32,6 +32,7 @@ from f1pred.ratings.profile import latest_profiles
 from f1pred.report.charts import calibration_chart, position_heatmap, title_chart, win_chart
 from f1pred.report.tables import (
     backtest_table,
+    distribution_table,
     forecast_table,
     profile_table,
     ratings_table,
@@ -238,6 +239,11 @@ def backtest(
         table, history, season_list, params, n_runs=runs, seed=seed, observed_rain=observed_rain
     )
     console.print(backtest_table(result.seasons))
+    console.print(distribution_table(result.seasons))
+    console.print(
+        f"ECE win {result.ece_win:.4f}, ECE podium {result.ece_podium:.4f}, "
+        f"sharpness {result.sharpness:.3f} over {len(result.races)} races"
+    )
     out.mkdir(parents=True, exist_ok=True)
     result.races.to_csv(out / "backtest_races.csv", index=False)
     result.seasons.to_csv(out / "backtest_seasons.csv", index=False)

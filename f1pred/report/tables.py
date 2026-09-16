@@ -90,6 +90,35 @@ def backtest_table(seasons: pd.DataFrame) -> Table:
     return table
 
 
+def distribution_table(seasons: pd.DataFrame) -> Table:
+    """Phase 7a scores over the whole finishing order (docs/metrics.md); lower is better."""
+    table = Table(title="Backtest: ranked probability score and top-3 set log loss")
+    cols = [
+        ("Season", "season"),
+        ("Races", "n_races"),
+        ("RPS model", "model_rps"),
+        ("RPS pole", "pole_rps"),
+        ("RPS uniform", "uniform_rps"),
+        ("Top3 model", "model_top3"),
+        ("Top3 pole", "pole_top3"),
+        ("Top3 uniform", "uniform_top3"),
+    ]
+    for label, _ in cols:
+        table.add_column(label, justify="right")
+    for r in seasons.itertuples(index=False):
+        values = []
+        for _, key in cols:
+            v = getattr(r, key)
+            if key in ("season", "n_races"):
+                values.append(str(int(v)))
+            elif key.endswith("_rps"):
+                values.append(f"{v:.3f}")
+            else:
+                values.append(f"{v:.2f}")
+        table.add_row(*values)
+    return table
+
+
 def title_tables(
     forecast: SeasonForecast, names: Mapping[str, str], top: int = 10
 ) -> tuple[Table, Table]:

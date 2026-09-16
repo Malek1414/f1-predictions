@@ -9,9 +9,14 @@ import numpy as np
 import pandas as pd
 
 from f1pred.backtest.scoring import (
+    ece,
+    mean_rps,
     podium_brier,
     pole_baseline,
     position_spearman,
+    set_log_loss,
+    sharpness,
+    top3_set_log_loss,
     uniform_baseline,
     winner_log_loss,
 )
@@ -37,6 +42,13 @@ RACE_SCORE_COLUMNS = [
     "uniform_brier",
     "model_spearman",
     "pole_spearman",
+    # Phase 7a distribution scores (docs/metrics.md).
+    "model_rps",
+    "pole_rps",
+    "uniform_rps",
+    "model_top3",
+    "pole_top3",
+    "uniform_top3",
 ]
 SEASON_SCORE_COLUMNS = ["season", "n_races"] + RACE_SCORE_COLUMNS[6:]
 
@@ -46,6 +58,10 @@ class BacktestResult:
     races: pd.DataFrame
     seasons: pd.DataFrame
     calibration: pd.DataFrame
+    # Over every driver-race in the run (Phase 7a).
+    ece_win: float = float("nan")
+    ece_podium: float = float("nan")
+    sharpness: float = float("nan")
 
 
 class StaleRatingsError(Exception):
@@ -145,7 +161,7 @@ def run_backtest(
         profiles = profile_lookup(profile_features(table, history, params))
     race_history = history[~history["is_sprint"]]
 
-    rows, all_p, all_won = [], [], []
+    rows, all_p, all_won, all_p_podium, all_on_podium, win_vectors = [], [], [], [], [], []
     for i, race_id in enumerate(race_ids):
         race_rows = races[races["race_id"] == race_id]
         hist_rows = race_history[race_history["race_id"] == race_id]
@@ -164,7 +180,12 @@ def run_backtest(
         else:
             rain = circuit_wet_rate(table, first.circuit_id, first.date)
         forecast = simulate_race(
-            entrants, params, n_runs=n_runs, seed=seed + i, rain_probability=rain
+            entrants,
+            params,
+            n_runs=n_runs,
+            seed=seed + i,
+            rain_probability=rain,
+            keep_positions=True,
         )
 
         classified = race_rows[race_rows["position"].notna()]
@@ -196,10 +217,19 @@ def run_backtest(
                 "uniform_brier": podium_brier(uni.p_podium, podium),
                 "model_spearman": position_spearman(expected, actual),
                 "pole_spearman": position_spearman(pole.expected_position, actual),
+                "model_rps": mean_rps(forecast.position_matrix, ids, actual),
+                "pole_rps": mean_rps(pole.position_matrix(ids), ids, actual),
+                "uniform_rps": mean_rps(uni.position_matrix(ids), ids, actual),
+                "model_top3": top3_set_log_loss(forecast.positions, ids, podium),
+                "pole_top3": set_log_loss(pole.top3_set_prob(podium)),
+                "uniform_top3": set_log_loss(uni.top3_set_prob(podium)),
             }
         )
         all_p.extend(forecast.p_win.tolist())
         all_won.extend([1.0 if d == winner else 0.0 for d in ids])
+        all_p_podium.extend(forecast.p_podium.tolist())
+        all_on_podium.extend([1.0 if d in podium else 0.0 for d in ids])
+        win_vectors.append(forecast.p_win)
 
     race_df = pd.DataFrame(rows, columns=RACE_SCORE_COLUMNS)
     season_df = (
@@ -208,7 +238,14 @@ def run_backtest(
         .reset_index()[SEASON_SCORE_COLUMNS]
     )
     calibration = calibration_table(np.array(all_p), np.array(all_won))
-    return BacktestResult(race_df, season_df, calibration)
+    return BacktestResult(
+        race_df,
+        season_df,
+        calibration,
+        ece_win=ece(np.array(all_p), np.array(all_won)),
+        ece_podium=ece(np.array(all_p_podium), np.array(all_on_podium)),
+        sharpness=sharpness(win_vectors),
+    )
 
 
 VARIANTS = {

@@ -46,6 +46,7 @@ class RaceForecast:
     n_runs: int
     used_grid: bool
     rain_probability: float = 0.0
+    positions: np.ndarray | None = None  # (n_runs, n) when simulate_race(keep_positions=True)
 
     def as_frame(self) -> pd.DataFrame:
         df = pd.DataFrame(
@@ -158,6 +159,7 @@ def simulate_race(
     seed: int | None = None,
     use_grid: bool = True,
     rain_probability: float = 0.0,
+    keep_positions: bool = False,
 ) -> RaceForecast:
     rng = np.random.default_rng(seed)
     n = len(entrants)
@@ -182,4 +184,5 @@ def simulate_race(
         n_runs=n_runs,
         used_grid=used_grid,
         rain_probability=rain_probability,
+        positions=positions if keep_positions else None,
     )

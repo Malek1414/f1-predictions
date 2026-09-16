@@ -65,6 +65,24 @@ def test_run_backtest_shapes_and_baselines(driver_race, sample_history):
     assert result.calibration["count"].sum() == n_rows == 479
 
 
+def test_backtest_distribution_scores(driver_race, sample_history):
+    # Phase 7a: RPS and top-3 set log loss per race for the model and both baselines, plus
+    # ECE and sharpness over every driver-race.
+    result = run_backtest(driver_race, sample_history, [2024], P, n_runs=300, seed=1)
+    new = ["model_rps", "pole_rps", "uniform_rps", "model_top3", "pole_top3", "uniform_top3"]
+    assert RACE_SCORE_COLUMNS[-6:] == new and set(new) <= set(SEASON_SCORE_COLUMNS)
+    assert result.races[new].notna().all().all()
+    rps_cols = result.races[["model_rps", "pole_rps", "uniform_rps"]]
+    assert ((rps_cols >= 0) & (rps_cols <= 1)).all().all()
+    # The uniform top-3 loss is log C(n, 3) exactly (20 cars -> 1140 sets; 19 -> 969).
+    assert set(result.races.uniform_top3.round(6)) <= {
+        round(math.log(1140), 6),
+        round(math.log(969), 6),
+    }
+    assert 0.0 <= result.ece_win <= 1.0 and 0.0 <= result.ece_podium <= 1.0
+    assert 0.0 < result.sharpness <= 1.0
+
+
 def test_backtest_never_reads_future(driver_race, sample_history, monkeypatch):
     """Every history row used for a race must carry that race's own id (pre-race snapshot)."""
     import f1pred.backtest.run as run_mod

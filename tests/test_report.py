@@ -56,6 +56,25 @@ def test_backtest_table():
     assert "2024" in text and "1.20" in text and "3.00" in text
 
 
+def test_distribution_table():
+    from f1pred.report.tables import distribution_table
+
+    seasons = pd.DataFrame(
+        {
+            "season": [2024],
+            "n_races": [24],
+            "model_rps": [0.123],
+            "pole_rps": [0.2],
+            "uniform_rps": [0.333],
+            "model_top3": [4.5],
+            "pole_top3": [6.0],
+            "uniform_top3": [7.04],
+        }
+    )
+    text = _render(distribution_table(seasons))
+    assert "2024" in text and "0.123" in text and "7.04" in text
+
+
 def test_charts_write_png(tmp_path):
     f = _forecast()
     assert win_chart(f, NAMES, "Test GP", tmp_path / "win.png").stat().st_size > 1000
