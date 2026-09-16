@@ -8,6 +8,8 @@ from f1pred.pace.design import build_design, season_weight, target_design
 from f1pred.sim.race import Entrant
 
 P = DEFAULT_PARAMS
+# The age discount ships disabled, so tests of the mechanism set it explicitly.
+WEIGHTED = P.replace(season_half_life=2.0)
 
 
 @pytest.fixture(scope="module")
@@ -119,8 +121,9 @@ def test_an_infinite_half_life_disables_the_weighting_exactly(driver_race):
 
 
 def test_row_weights_are_one_in_the_latest_season_and_decay_monotonically_with_age(
-    driver_race, design
+    driver_race,
 ):
+    design = build_design(driver_race, params=WEIGHTED)
     latest = max(design.seasons)
     row_season = np.asarray([design.seasons[s] for s in design.season_of_race])[design.race]
     assert (design.row_weight[row_season == latest] == 1.0).all()
@@ -133,5 +136,5 @@ def test_row_weights_are_one_in_the_latest_season_and_decay_monotonically_with_a
     # The per-race version agrees with the rows it covers.
     race_season = np.asarray([design.seasons[s] for s in design.season_of_race])
     np.testing.assert_allclose(
-        design.race_weight, season_weight(race_season, latest, P.season_half_life)
+        design.race_weight, season_weight(race_season, latest, WEIGHTED.season_half_life)
     )

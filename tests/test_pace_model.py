@@ -20,6 +20,8 @@ from tests.synthetic_pace import (
 P = DEFAULT_PARAMS
 TINY = {"num_warmup": 80, "num_samples": 80, "chains": 1}
 UNWEIGHTED = P.replace(season_half_life=float("inf"))
+# The age discount ships disabled; the discount tests turn it on explicitly.
+WEIGHTED = P.replace(season_half_life=2.0)
 # "vet" is ordinary for five seasons and 2.0 quicker in the sixth, sharing car A with "ace".
 BREAKOUT = ("vet", 2023, 2.0)
 
@@ -28,7 +30,7 @@ BREAKOUT = ("vet", 2023, 2.0)
 def planted_pair():
     """The same planted breakout fit with the season age discount on and off."""
     kw = {"breakout": BREAKOUT, "seasons": LONG_SEASONS}
-    weighted = fit(synthetic_design(seed=0, params=P, **kw), P, seed=0, **TINY)
+    weighted = fit(synthetic_design(seed=0, params=WEIGHTED, **kw), WEIGHTED, seed=0, **TINY)
     unweighted = fit(synthetic_design(seed=0, params=UNWEIGHTED, **kw), UNWEIGHTED, seed=0, **TINY)
     return weighted, unweighted
 

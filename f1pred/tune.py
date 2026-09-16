@@ -36,6 +36,8 @@ SEARCH_SPACE: dict[str, list[float]] = {
     "risk_dnf_scale": [0.0, 0.25, 0.5],
     "form_scale": [0.0, 10.0, 20.0, 40.0],
     "shrink_profile": [2.0, 5.0, 10.0],
+    # Phase 7b age discount. inf disables it; the Bayesian walk-forward searches the rest.
+    "season_half_life": [float("inf"), 8.0, 4.0, 2.0],
 }
 
 

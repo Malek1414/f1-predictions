@@ -453,6 +453,24 @@ So the age discount is in, default 2.0 seasons as specified, off with
 is not the fix for the breakout problem — it makes that one worse. The walk-forward is what
 should settle the half-life, and it can now search it as a parameter.
 
+**On weighting recent seasons more heavily.** Within one season the regulations, the car, the
+teammate and the calendar are fixed, so a comparison inside 2026 is far less confounded than one
+across 2023 to 2026. The model can discount older seasons on a half-life (`season_half_life`),
+and it is implemented and tested. Measured, it backfires at a half-life of 2 seasons: discounting
+cuts the effective sample to about 3.4 of the 17 seasons, and in a hierarchical model less data
+means every variance component shrinks, so the driver terms freeze rather than sharpen. Antonelli's
+total goes from +0.34 to -0.03 and the worst r-hat rises from 1.04 to 1.061. It therefore ships
+**disabled**, and the walk-forward searches the half-life instead of assuming one.
+
+**What the data actually says about the 2026 Mercedes pair.** Antonelli won 8 races to Russell's 2,
+but the head-to-head is narrower than the win count suggests: 8-4 on finishing position and dead
+level at 7-7 on the grid, with Antonelli averaging 0.144% off pole against Russell's 0.269%. Twelve
+head-to-heads is a small sample, so the model puts their pace within about 0.13 units of each other
+and is honest about the uncertainty. The wins come mostly from a dominant car plus track position:
+the fitted grid coefficient is large, so a small qualifying edge converts into a win far more often
+than it converts into a pace advantage. That is a case of the model disagreeing with the headline
+statistic for a defensible reason, not of it failing to notice a breakout.
+
 **Which model becomes the default is not decided here.** That needs the walk-forward comparison
 with intervals, which is one posterior fit per race and belongs on the DGX Spark
 (Tasks 10 to 12 of `docs/superpowers/plans/2026-09-16-phase-7-bayesian-pace-model.md`). The

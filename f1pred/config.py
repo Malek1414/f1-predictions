@@ -68,7 +68,10 @@ class ModelParams:
     # regulations, the car, the teammate and the calendar are held fixed, so a within-season
     # comparison is far less confounded than a cross-season one; older seasons still carry
     # information but should not count the same as what is happening now. `inf` disables it.
-    season_half_life: float = 2.0
+    # Age discount on the likelihood, in seasons. Implemented and measured in Phase 7b:
+    # at a half-life of 2 it shrinks every variance component and freezes the driver
+    # terms, so it ships disabled and the walk-forward searches it instead.
+    season_half_life: float = float("inf")
     # "elo" (phases 1 to 6) or "bayes" (the posterior pace model). One pace unit is worth
     # `pace_scale` rating points, so the existing reports keep their Elo semantics.
     model: str = "elo"
