@@ -7,8 +7,11 @@ from f1pred.config import DEFAULT_PARAMS
 from f1pred.pace.model import fit, plackett_luce_logp, predict_mu
 from f1pred.pace.posterior import Posterior
 from tests.synthetic_pace import (
+    SEASONS,
     FakeRace,
+    contaminated_design,
     last_race_entrants,
+    planted_teammate_gap,
     synthetic_design,
     synthetic_table,
 )
@@ -65,6 +68,46 @@ def test_fit_recovers_a_positive_qualifying_scale(planted):
     s = post.summary().set_index("param")
     assert s.loc["kappa", "mean"] > 0.3
     assert post.diagnostics["num_samples"] == TINY["num_samples"] * TINY["chains"]
+
+
+def test_nu_q_is_sampled_and_reported(planted):
+    _, post = planted
+    s = post.summary().set_index("param")
+    assert "nu_q" in s.index
+    assert s.loc["nu_q", "mean"] > 0.0
+    assert np.isfinite(s.loc["nu_q", ["lo", "hi", "r_hat", "ess"]].to_numpy(dtype=float)).all()
+
+
+def _teammate_gap(post, season: int) -> float:
+    """The recovered pace between the two drivers of car A, where the car term cancels.
+
+    Only contrasts are identified: the qualifying intercept absorbs a per-race shift and the
+    Plackett-Luce term is shift-invariant, so the overall level is pinned by the priors alone.
+    """
+    total = post.driver_table(season).set_index("driver_id")["total"]
+    return float(total["ace"] - total["vet"])
+
+
+def test_student_t_quali_survives_junk_laps_that_drag_the_normal():
+    """5% of the gaps are junk laps on one driver: the Normal follows them, the Student-t does not.
+
+    Both variants see exactly the same data and the same finishing orders, so anything that
+    separates them comes from the qualifying likelihood alone.
+    """
+    design = contaminated_design(seed=0, fraction=0.05)
+    season, planted = SEASONS[-1], planted_teammate_gap()
+    robust = fit(design, P, seed=0, **TINY)
+    normal = fit(design, P, seed=0, robust_quali=False, **TINY)
+    robust_error = abs(_teammate_gap(robust, season) - planted)
+    normal_error = abs(_teammate_gap(normal, season) - planted)
+    assert robust_error < normal_error
+    # Not a tie broken by noise: the Normal loses most of the planted gap to the junk laps.
+    assert normal_error > 0.5 * planted > robust_error
+    # The Normal has to stretch itself over the junk; the Student-t reads it as tail.
+    robust_sigma = robust.summary().set_index("param").loc["sigma_q", "mean"]
+    normal_sigma = normal.summary().set_index("param").loc["sigma_q", "mean"]
+    assert robust_sigma < normal_sigma
+    assert "nu_q" not in set(normal.summary()["param"])
 
 
 def test_breakout_season_is_credited_within_season():

@@ -92,6 +92,38 @@ def synthetic_design(seed: int = 0, breakout: tuple[str, int, float] | None = No
     return build_design(synthetic_table(seed, breakout), params=DEFAULT_PARAMS)
 
 
+JUNK_FLOOR = 1.5  # a junk lap is at least this far off pole, then exponentially further
+JUNK_SCALE = 1.0
+
+
+def contaminated_table(seed: int = 0, fraction: float = 0.05, driver: str = "ace"):
+    """The synthetic table with `fraction` of the qualifying gaps replaced by junk laps.
+
+    A junk lap is what a wet or red-flagged session leaves behind: a large, one-sided gap that
+    says nothing about pace. Two things about it are copied from the real data. It is
+    positive-only — a disrupted session only ever makes a lap look slow. And it is not spread
+    evenly: the gaps that reach 20% and beyond belong to whoever was on track at the wrong
+    moment, so here they all land on one driver, which is what turns a heavy tail into a bias.
+    """
+    table = synthetic_table(seed)
+    rng = np.random.default_rng(seed + 9_000)
+    gaps = table["quali_gap_pct"].to_numpy(dtype=float, copy=True)
+    rows = np.flatnonzero((table["driver_id"] == driver).to_numpy())
+    hit = rng.choice(rows, size=max(int(round(fraction * len(table))), 1), replace=False)
+    gaps[hit] = JUNK_FLOOR + rng.exponential(JUNK_SCALE, size=hit.size)
+    table["quali_gap_pct"] = gaps
+    return table
+
+
+def contaminated_design(seed: int = 0, fraction: float = 0.05, driver: str = "ace"):
+    return build_design(contaminated_table(seed, fraction, driver), params=DEFAULT_PARAMS)
+
+
+def planted_teammate_gap(fast: str = "ace", slow: str = "vet") -> float:
+    """The planted pace between two drivers in the same car, so the car term cancels."""
+    return SKILL[fast] - SKILL[slow]
+
+
 def last_race_entrants(table: pd.DataFrame):
     """Entrants copied from the final race of the synthetic table, with its grid."""
     from f1pred.sim.race import Entrant

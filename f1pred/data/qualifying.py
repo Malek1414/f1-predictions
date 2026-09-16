@@ -7,13 +7,20 @@ observation of the same latent pace.
 
 from __future__ import annotations
 
+import logging
 import math
 
 import numpy as np
 import pandas as pd
 
+log = logging.getLogger(__name__)
+
 QUALIFYING_COLUMNS = ("race_id", "driver_id", "quali_position", "best_ms", "gap_pct")
 SEGMENTS = ("q1", "q2", "q3")
+# A lap twice as slow as pole is a source error, not a lap: a 1995 row parses to a 1,002,640 ms
+# "best lap", a 923% gap. Genuine wet and red-flagged sessions stay well under this (the worst
+# since 2010 is 46%) and are left to the model's Student-t qualifying likelihood to discount.
+MAX_PLAUSIBLE_GAP_PCT = 100.0
 
 
 def parse_lap_ms(text: str | float | None) -> float | None:
@@ -41,7 +48,8 @@ def qualifying_gaps(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
 
     `best_ms` is the fastest of Q1, Q2 and Q3; `gap_pct = 100 * (best_ms - pole_ms) / pole_ms`
     where `pole_ms` is the fastest `best_ms` of that race. A driver who set no time keeps a
-    `quali_position` but gets NaN for both.
+    `quali_position` but gets NaN for both, and so does one whose gap exceeds
+    `MAX_PLAUSIBLE_GAP_PCT`, which is a source error rather than a slow lap.
     """
     q = raw["qualifying"]
     drivers = raw["drivers"][["driverId", "driverRef"]]
@@ -60,5 +68,13 @@ def qualifying_gaps(raw: dict[str, pd.DataFrame]) -> pd.DataFrame:
     )
     pole = out.groupby("race_id")["best_ms"].transform("min")
     out["gap_pct"] = 100.0 * (out["best_ms"] - pole) / pole
+    implausible = out["gap_pct"] > MAX_PLAUSIBLE_GAP_PCT
+    if implausible.any():
+        log.warning(
+            "a qualifying lap more than %.0f%% off pole is a source error, not a lap; dropped %d",
+            MAX_PLAUSIBLE_GAP_PCT,
+            int(implausible.sum()),
+        )
+        out.loc[implausible, "gap_pct"] = np.nan
     out = out.sort_values(["race_id", "quali_position"], kind="stable").reset_index(drop=True)
     return out[list(QUALIFYING_COLUMNS)]

@@ -1,7 +1,7 @@
 """The Bayesian hierarchical pace model in NumPyro. Spec 2.2; maths in `docs/pace-model.md`.
 
 One latent pace per driver-race explains three things at once: the finishing order (a
-Plackett-Luce likelihood), the qualifying gap to pole (a Normal likelihood sharing the same
+Plackett-Luce likelihood), the qualifying gap to pole (a Student-t likelihood sharing the same
 skill and car effects), and whether the car finished (a logistic DNF hazard).
 """
 
@@ -40,6 +40,7 @@ KEEP = (
     "beta_grid",
     "kappa",
     "sigma_q",
+    "nu_q",
     "tau_skill",
     "tau_season",
     "tau_car",
@@ -162,7 +163,17 @@ def model_arrays(design: PaceDesign) -> ModelArrays:
     )
 
 
-def pace_model(design: PaceDesign, params: ModelParams, arrays: ModelArrays | None = None) -> None:
+def pace_model(
+    design: PaceDesign,
+    params: ModelParams,
+    arrays: ModelArrays | None = None,
+    robust_quali: bool = True,
+) -> None:
+    """`robust_quali=False` swaps the Student-t qualifying likelihood back to a Normal.
+
+    That is only there so a test can fit both on the same data; nothing in the CLI or in
+    `ModelParams` reaches it, and every fit the project ships is the robust one.
+    """
     a = model_arrays(design) if arrays is None else arrays
     d, row = a.design, a.row
 
@@ -220,11 +231,21 @@ def pace_model(design: PaceDesign, params: ModelParams, arrays: ModelArrays | No
     numpyro.factor("finishing_order", plackett_luce_logp(mu_sorted, a.pl_len).sum())
 
     # Qualifying: the same latent pace seen again, without the grid, wet or track terms.
+    # The gap to pole has a long right tail — wet and red-flagged sessions, a lap abandoned
+    # under yellows — so a Normal here spends `sigma_q` on the junk and leaves nothing for the
+    # pace. Student-t with a learned `nu_q` reads the tail as tail. `nu_q ~ Gamma(2, 0.1)` is
+    # the usual weakly-informative degrees-of-freedom prior: mass on the robust single digits,
+    # room to run to 50 and behave like the Normal if the tail turns out not to be there.
     with numpyro.plate("races", d.n_race):
         alpha = numpyro.sample("alpha", dist.Normal(0.0, ALPHA_SD))
     mu_q = shared + car_pace
     loc = alpha[row["race"]] - kappa * mu_q
-    numpyro.sample("quali", dist.Normal(loc[a.q_rows], sigma_q), obs=a.q_obs)
+    if robust_quali:
+        nu_q = numpyro.sample("nu_q", dist.Gamma(2.0, 0.1))
+        quali = dist.StudentT(nu_q, loc[a.q_rows], sigma_q)
+    else:
+        quali = dist.Normal(loc[a.q_rows], sigma_q)
+    numpyro.sample("quali", quali, obs=a.q_obs)
 
     h0 = numpyro.sample("h0", dist.Normal(H0_LOC, H0_SD))
     h_wet = numpyro.sample("h_wet", dist.Normal(0.0, HAZARD_SD))
@@ -262,8 +283,12 @@ def fit(
     seed: int = 0,
     device: str | None = None,
     progress_bar: bool = False,
+    robust_quali: bool = True,
 ) -> Posterior:
-    """Run NUTS and return the posterior. `None` arguments fall back to `params.pace_*`."""
+    """Run NUTS and return the posterior. `None` arguments fall back to `params.pace_*`.
+
+    `robust_quali` is the model's own switch (see `pace_model`) and is only set by tests.
+    """
     num_warmup = params.pace_num_warmup if num_warmup is None else num_warmup
     num_samples = params.pace_num_samples if num_samples is None else num_samples
     chains = params.pace_chains if chains is None else chains
@@ -286,6 +311,7 @@ def fit(
         design,
         params,
         arrays,
+        robust_quali,
         extra_fields=("diverging",),
     )
     # JAX dispatches asynchronously, so `run` returns long before the chains are done; the

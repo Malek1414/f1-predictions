@@ -61,8 +61,16 @@ overall level is pinned only by the priors.
 (`f1pred/data/qualifying.py`), available for about 99% of driver-races since 2010.
 
 ```
-gap[d, r] ~ Normal(alpha[r] - kappa * mu_q[d, r], sigma_q)
+gap[d, r] ~ StudentT(nu_q, alpha[r] - kappa * mu_q[d, r], sigma_q)
 ```
+
+The gap has a long right tail: since 2010 the median is 1.8% but 8.4% of laps are more than 5%
+off pole, 1.6% more than 10%, and the worst is 45.6%. Those are wet and red-flagged sessions,
+not slow cars, and under a Normal likelihood they set `sigma_q` on their own and leave nothing
+of the qualifying signal. The Student-t reads them as tail; `nu_q ~ Gamma(2, 0.1)` is the usual
+weakly-informative degrees-of-freedom prior, with room to run high and behave like the Normal if
+the tail is not there. Gaps above `MAX_PLAUSIBLE_GAP_PCT` (100%) are dropped before the model
+sees them — a lap twice as slow as pole is a source error, not a lap.
 
 `mu_q` is the same pace **without** the grid, wet and track terms — a car and driver measured on
 an empty track. `alpha[r]` is a per-race intercept that absorbs track length and session
@@ -90,6 +98,7 @@ Fit jointly, so a fragile car is not mistaken for a slow one.
 | `wet[d]`, `track[d, t]` | `Normal(0, tau_wet)`, `Normal(0, tau_track)` |
 | `beta_grid` | `Normal(0, 1)` |
 | `kappa`, `sigma_q` | `HalfNormal(2)`, `HalfNormal(1)` |
+| `nu_q` | `Gamma(2, 0.1)` |
 | `tau_skill`, `tau_season` | `HalfNormal(0.3)`, `HalfNormal(0.5)` |
 | `tau_car`, `tau_car_reg`, `tau_form` | `HalfNormal(0.5)`, `HalfNormal(1.5)`, `HalfNormal(0.1)` |
 | `tau_wet`, `tau_track` | `HalfNormal(0.3)` both |

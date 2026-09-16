@@ -24,6 +24,7 @@ SCALARS = (
     "beta_grid",
     "kappa",
     "sigma_q",
+    "nu_q",
     "tau_skill",
     "tau_season",
     "tau_car",
