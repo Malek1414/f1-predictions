@@ -6,6 +6,7 @@ import pytest
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import TABLES, load_raw_from_dir
 from f1pred.data.laps import load_lap1_csv
+from f1pred.data.qualifying import qualifying_gaps
 from f1pred.data.track_types import load_track_types
 from f1pred.data.weather import load_weather_csv
 
@@ -45,6 +46,7 @@ def driver_race(raw_sample, weather_sample, lap1_sample) -> pd.DataFrame:
         weather=weather_sample,
         track_types=load_track_types(),
         lap1=lap1_sample,
+        qualifying=qualifying_gaps(raw_sample),
     )
 
 

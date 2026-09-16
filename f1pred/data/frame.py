@@ -33,9 +33,11 @@ DRIVER_RACE_COLUMNS = (
     "is_wet",
     "track_type",
     "lap1_position",
+    "quali_gap_pct",
 )
-# Columns produced per session; is_wet and track_type are added once for the whole table.
-_SESSION_COLUMNS = tuple(c for c in DRIVER_RACE_COLUMNS if c not in ("is_wet", "track_type"))
+# Columns produced per session; the rest are added once for the whole table.
+_WHOLE_TABLE_COLUMNS = ("is_wet", "track_type", "quali_gap_pct")
+_SESSION_COLUMNS = tuple(c for c in DRIVER_RACE_COLUMNS if c not in _WHOLE_TABLE_COLUMNS)
 
 ACCIDENT_STATUSES = {"Accident", "Collision", "Spun off", "Collision damage", "Damage"}
 MECHANICAL_STATUSES = {
@@ -227,11 +229,13 @@ def build_driver_race_table(
     weather: pd.DataFrame | None = None,
     track_types: Mapping[str, str] | None = None,
     lap1: pd.DataFrame | None = None,
+    qualifying: pd.DataFrame | None = None,
 ) -> pd.DataFrame:
     """Spec 3.5. `weather` is the race_id -> is_wet table; sprint rows share their race's is_wet.
 
     With `weather=None` every row is dry; with `track_types=None` every row is `mixed`;
-    with `lap1=None` (the `raceId, driverId, lap1_position` table) `lap1_position` is all NA.
+    with `lap1=None` (the `raceId, driverId, lap1_position` table) `lap1_position` is all NA;
+    with `qualifying=None` (the `qualifying_gaps` table) `quali_gap_pct` is all NaN.
     """
     races = raw["races"].rename(columns={"name": "name_race"})
     races = races[races["year"] >= start_season][
@@ -259,5 +263,11 @@ def build_driver_race_table(
     table["track_type"] = table["circuit_id"].map(
         lambda c: track_type_for(c, mapping) if mapping else DEFAULT_TRACK_TYPE
     )
+    if qualifying is not None and len(qualifying):
+        gap = qualifying.set_index(["race_id", "driver_id"])["gap_pct"].astype(float)
+        keys = pd.MultiIndex.from_arrays([table["race_id"], table["driver_id"]])
+        table["quali_gap_pct"] = gap.reindex(keys).to_numpy(dtype=float)
+    else:
+        table["quali_gap_pct"] = float("nan")
     table = table.sort_values(["date", "race_id", "grid"], kind="stable").reset_index(drop=True)
     return table[list(DRIVER_RACE_COLUMNS)]

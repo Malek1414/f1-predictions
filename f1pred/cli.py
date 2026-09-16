@@ -26,6 +26,7 @@ from f1pred.config import (
 from f1pred.data.frame import build_driver_race_table
 from f1pred.data.hub import DataUnavailableError, load_cached_tables, load_tables
 from f1pred.data.laps import download_lap1
+from f1pred.data.qualifying import qualifying_gaps
 from f1pred.data.track_types import load_track_types, track_type_for
 from f1pred.data.weather import build_weather_table, circuit_wet_rate
 from f1pred.predict import UnknownRaceError, build_prediction_inputs, resolve_race
@@ -136,6 +137,7 @@ def data_update(cache_dir: Path = CacheDir) -> None:
         weather=weather,
         track_types=load_track_types(),
         lap1=lap1,
+        qualifying=qualifying_gaps(raw),
     )
     table.to_parquet(cache_dir / DRIVER_RACE_FILE, index=False)
     races = table[~table.is_sprint]
@@ -148,6 +150,9 @@ def data_update(cache_dir: Path = CacheDir) -> None:
     console.print(f"{n_wet} wet races (>= {params.wet_threshold_mm} mm in the race window)")
     console.print(
         f"Lap-1 positions for {100 * races.lap1_position.notna().mean():.0f}% of race rows"
+    )
+    console.print(
+        f"Qualifying gaps for {100 * races.quali_gap_pct.notna().mean():.0f}% of race rows"
     )
 
 
