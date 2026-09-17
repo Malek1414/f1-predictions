@@ -317,25 +317,30 @@ What landed:
 - `ModelParams.model` stays `"elo"`. Nothing changes for existing commands.
 
 The default fit (2010 to 2026: 7,223 driver-races, 343 races, 5,657 parameters; 1,000 warmup and
-1,000 samples on each of 4 chains) takes about 11 minutes on the M2's CPU with **0 divergences**.
-Mercedes is the fastest 2026 car at +0.97 [+0.15, +1.80] pace units, ahead of Ferrari (+0.57) and
-McLaren (+0.28); Verstappen is the strongest driver at +0.86 [+0.48, +1.25]. Antonelli's 2026
-season effect is +0.02 [-0.05, +0.12].
+1,000 samples on each of 4 chains) takes about 23 minutes on the M2's CPU, with **0 divergences**,
+a worst r-hat of 1.044 and a minimum effective sample size of 132 across the 4,000 draws.
+Mercedes is the fastest 2026 car at +0.75 [-0.14, +1.64] pace units, ahead of Ferrari (+0.03) and
+McLaren (-0.00); Verstappen is the strongest driver at +0.74 [+0.34, +1.13]. Antonelli's 2026
+season effect is +0.05 [-0.07, +0.26], putting his total at +0.34 [-0.15, +0.81] against Russell's
++0.35 [-0.10, +0.80] — the two Mercedes drivers are level to within far less than the uncertainty
+on either.
 
 Baku 2026 (no qualifying yet, so both models ignore the grid), win probabilities from one run of
-each model on the same inputs. `Bayes` is the shipped default (`season_half_life = 2`); the last
-column is the same model with the season age discount switched off, which is where the numbers
-published before this change sit:
+each model on the same inputs:
 
-| Driver | Elo (7a) | Bayes | Bayes, no age discount |
-|---|---:|---:|---:|
-| Norris | 23.7% | 12.1% | 12.2% |
-| Verstappen | 20.4% | 11.6% | 17.4% |
-| Antonelli | 19.3% | 12.7% | 13.5% |
-| Russell | 14.5% | 15.9% | 11.1% |
-| Piastri | 7.8% | 9.7% | 10.6% |
-| Leclerc | 7.0% | 12.4% | 11.9% |
-| Hamilton | — | 12.6% | 9.8% |
+| Driver | Elo (7a) | Bayes |
+|---|---:|---:|
+| Verstappen | 20.4% | 17.3% |
+| Antonelli | 19.3% | 13.4% |
+| Leclerc | 7.0% | 12.3% |
+| Norris | 23.7% | 12.0% |
+| Russell | 14.5% | 11.2% |
+| Piastri | 7.8% | 10.6% |
+| Hamilton | — | 9.7% |
+
+The Bayesian column is flatter because every simulated race draws a different posterior sample
+rather than reusing one point estimate, so the model's own uncertainty reaches the odds. Which of
+the two is better calibrated is what the walk-forward has to settle.
 
 **The qualifying likelihood contributes.** It was written as a Normal, and the gap to pole has a
 long right tail — 8.4% of laps since 2010 are more than 5% off pole, 1.6% more than 10%, the
@@ -404,15 +409,15 @@ track position is worth so much that out-qualifying a teammate by a tenth conver
 lopsided win count without a large difference in pace. Whether *that* is the defect is a separate
 question from the prior, and not one this change answers.
 
-**Recent seasons now count for more, and it helps the cars and hurts the drivers.** Every
-observation's likelihood contribution is discounted by the age of its season,
-`w = 0.5 ** (age / season_half_life)` with a half-life of 2 seasons, applied to all three
+**Recent seasons can count for more, but measured, it helps the cars and hurts the drivers.**
+Every observation's likelihood contribution can be discounted by the age of its season,
+`w = 0.5 ** (age / season_half_life)`, applied to all three
 likelihoods and to none of the priors. The reasoning is that within one season the regulations,
 the car, the teammate and the calendar are all held fixed, so a within-season comparison is much
 less confounded than a cross-season one; older seasons still contribute, at a discount.
 `season_half_life = inf` turns it off exactly.
 
-| | no age discount | half-life 2 (default) |
+| | no age discount (default) | half-life 2 |
 |---|---:|---:|
 | `tau_season` | 0.063 [0.009, 0.111] | 0.031 [0.003, 0.074] |
 | `tau_skill` | 0.114 | 0.038 |
@@ -555,8 +560,9 @@ Phase 7b (Bayesian pace model):
   `tau_season`, not a Normal, so the driver-seasons that barely deviate can shrink to zero
   without forcing an exceptional one down with them.
 - All three likelihoods weight each observation by the age of its season,
-  `0.5 ** (age / season_half_life)` with `ModelParams.season_half_life = 2.0`; the priors are
-  unweighted, and `float("inf")` disables the discount exactly.
+  `0.5 ** (age / season_half_life)`; the priors are unweighted. It ships disabled
+  (`ModelParams.season_half_life = inf`) because at a half-life of 2 it freezes the driver terms,
+  and the half-life is in the tuning search space instead.
 - `simulate_positions` takes `strength_samples` and `p_dnf_samples`; on that path it drops its
   own grid term, forces `sigma_team` to 0 and uses the Gumbel-matched driver noise, because all
   of it is inside the posterior pace.

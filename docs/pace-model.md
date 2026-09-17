@@ -112,7 +112,10 @@ The discount is exponential in the age of the season:
 w[d, r] = 0.5 ** ((latest_season - season[r]) / season_half_life)
 ```
 
-`season_half_life` is a `ModelParams` field, 2.0 seasons by default: the latest season counts
+`season_half_life` is a `ModelParams` field. It ships as `inf`, meaning the discount is off,
+because at a half-life of 2 seasons it shrinks every variance component and freezes the driver
+terms rather than sharpening them; the walk-forward searches it instead. With a finite half-life
+of 2 the latest season counts
 full, a season two years older counts half, four years older a quarter. The weight multiplies the
 per-race Plackett-Luce log likelihood and scales the qualifying and DNF sites
 (`numpyro.handlers.scale`). **The priors are not weighted** — the random walks still pool over
@@ -186,7 +189,7 @@ credible interval), `r_hat` and `ess`.
 - `skill[max_verstappen,2026]` is career skill at that season; `skill_season[...]` is the extra
   this year only. A driver having a genuine breakout shows a large positive `skill_season` with
   an interval clear of zero. Calibrate your expectations: on the 2010–2026 table `tau_season`
-  fits at 0.031 [0.003, 0.074] with the default half-life and 0.063 [0.009, 0.111] without it,
+  fits at 0.031 [0.003, 0.074] with a half-life of 2 and 0.063 [0.009, 0.111] with the discount off (the default),
   and no driver-season in the 394 reaches a standardised deviation of 3, so "large" here means a
   tenth or two of a pace unit. Antonelli in 2026 is the biggest on the current grid at
   +0.02 [-0.05, +0.12] and does not clear zero.
